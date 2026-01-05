@@ -23,6 +23,9 @@ DEFAULT_CONFIG = {
     "online_tools": True,
     # API keys (these will be overridden by environment variables if present)
     "openai_api_key": None,
+    # Local LLM settings (optional - for Ollama, LMStudio, vLLM, etc.)
+    "openai_base_url": None,  # e.g., "http://localhost:1234/v1" for LMStudio
+    "openai_use_local": False,  # Set to True to use local LLM
     "finnhub_api_key": None,
     "alpaca_api_key": None,
     "alpaca_secret_key": None,

@@ -3,13 +3,14 @@ from chromadb.config import Settings
 from openai import OpenAI
 import numpy as np
 from tradingagents.dataflows.config import get_api_key
-
+from tradingagents.dataflows.config import get_openai_client_config
 
 class FinancialSituationMemory:
     def __init__(self, name):
-        # Get API key from environment variables or config
-        api_key = get_api_key("openai_api_key", "OPENAI_API_KEY")
-        self.client = OpenAI(api_key=api_key)
+        # Get OpenAI client configuration (supports local LLMs)
+        
+        client_config = get_openai_client_config()
+        self.client = OpenAI(**client_config)
         self.chroma_client = chromadb.Client(Settings(allow_reset=True))
         self.situation_collection = self.chroma_client.get_or_create_collection(name=name)
 

@@ -17,7 +17,7 @@ import pandas as pd
 from tqdm import tqdm
 from openai import OpenAI
 from .config import get_config, set_config, DATA_DIR, get_api_key
-
+from .config import get_openai_client_config
 
 def get_model_params(model_name, max_tokens_value=3000):
     """Get appropriate parameters for different model types."""
@@ -586,7 +586,9 @@ def get_stock_news_openai(ticker, curr_date):
         
         print(f"[SOCIAL] Using ticker format: {openai_ticker} (from input: {normalize_ticker_for_logs(ticker)})")
         
-        client = OpenAI(api_key=api_key)
+        
+        client_config = get_openai_client_config()
+        client = OpenAI(**client_config)
         
         # Get the selected quick model from config
         config = get_config()
@@ -793,7 +795,9 @@ def get_global_news_openai(curr_date, ticker_context=None):
         return f"Error: OpenAI API key not found. Please set OPENAI_API_KEY environment variable."
     
     try:
-        client = OpenAI(api_key=api_key)
+        from .config import get_openai_client_config
+        client_config = get_openai_client_config()
+        client = OpenAI(**client_config)
         
         # Get the selected quick model from config
         config = get_config()
@@ -1005,7 +1009,9 @@ def get_fundamentals_openai(ticker, curr_date):
         return f"Error: OpenAI API key not found. Please set OPENAI_API_KEY environment variable."
     
     try:
-        client = OpenAI(api_key=api_key)
+        from .config import get_openai_client_config
+        client_config = get_openai_client_config()
+        client = OpenAI(**client_config)
         
         # Get the selected quick model from config
         config = get_config()
