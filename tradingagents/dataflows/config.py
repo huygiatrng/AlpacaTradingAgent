@@ -48,6 +48,29 @@ def get_api_key(key_name: str, env_var_name: str) -> str:
     return api_key
 
 
+def get_openai_client_config() -> dict:
+    """Get OpenAI client configuration including base URL for local LLMs."""
+    config = get_config()
+    client_config = {}
+    
+    # Get API key
+    api_key = get_api_key("openai_api_key", "OPENAI_API_KEY")
+    if api_key:
+        client_config["api_key"] = api_key
+    
+    # Check for local LLM configuration
+    use_local = config.get("openai_use_local", False) or os.getenv("OPENAI_USE_LOCAL", "false").lower() == "true"
+    base_url = config.get("openai_base_url") or os.getenv("OPENAI_BASE_URL")
+    
+    if use_local and base_url:
+        client_config["base_url"] = base_url
+        # For local LLMs, use a default API key if none provided
+        if not client_config.get("api_key"):
+            client_config["api_key"] = "local-llm"
+    
+    return client_config
+
+
 def get_openai_api_key() -> str:
     """Get OpenAI API key from environment variables or config."""
     return get_api_key("openai_api_key", "OPENAI_API_KEY")
