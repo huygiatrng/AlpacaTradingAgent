@@ -90,8 +90,8 @@ Our enhanced framework decomposes complex trading tasks into specialized roles w
 
 Clone AlpacaTradingAgent:
 ```bash
-git clone https://github.com/TauricResearch/TradingAgents.git
-cd TradingAgents
+git clone https://github.com/huygiatrng/AlpacaTradingAgent.git
+cd AlpacaTradingAgent
 ```
 
 Create a virtual environment:
