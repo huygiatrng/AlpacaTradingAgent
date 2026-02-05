@@ -12,6 +12,7 @@ DEFAULT_SETTINGS = {
     "analyst_news": True,
     "analyst_fundamentals": True,
     "analyst_macro": True,
+    "parallel_analysts": False,
     "research_depth": "Shallow",
     "allow_shorts": False,
     "loop_enabled": False,
@@ -20,8 +21,9 @@ DEFAULT_SETTINGS = {
     "market_hours_input": "",
     "trade_after_analyze": False,
     "trade_dollar_amount": 4500,
-    "quick_llm": "gpt-5-nano",
-    "deep_llm": "gpt-5-nano"
+    "ai_position_sizing": True,  # AI-determined position sizing enabled by default
+    "quick_llm": "gpt-5-mini-2025-08-07",
+    "deep_llm": "gpt-5.2-2025-12-11"
 }
 
 def get_default_settings() -> Dict[str, Any]:

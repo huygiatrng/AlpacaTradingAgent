@@ -69,10 +69,12 @@ def create_risk_manager(llm, memory, config=None):
 
         buying_power = account_info.get("buying_power", 0.0)
         cash = account_info.get("cash", 0.0)
+        equity = account_info.get("equity", 0.0)
         daily_change_dollars = account_info.get("daily_change_dollars", 0.0)
         daily_change_percent = account_info.get("daily_change_percent", 0.0)
         account_status_desc = (
             "Account Status:\n"
+            f"- Account Equity: ${equity:,.2f}\n"
             f"- Buying Power: ${buying_power:,.2f}\n"
             f"- Cash: ${cash:,.2f}\n"
             f"- Daily Change: ${daily_change_dollars:,.2f} ({daily_change_percent:.2f}%)"
@@ -152,6 +154,22 @@ Your final {decision_format} decision should address:
 4. **Risk Controls:** Daily stop loss, position limits, correlation checks
 5. **Market Conditions:** Factor in VIX, daily trend strength, volume patterns
 
+**POSITION SIZE VALIDATION:**
+Review the trader's recommended position size and validate it meets risk parameters:
+- Account Equity: ${equity:,.2f}
+- Buying Power: ${buying_power:,.2f}
+- Trader's Recommendation: [extracted from trader plan above]
+
+Validate that position size:
+- Does not exceed 3% account risk
+- Is appropriate for the volatility and stop loss distance
+- Stays within available buying power
+- Fits overall portfolio risk limits
+
+You MUST conclude with:
+APPROVED POSITION SIZE: $X,XXX
+(If adjusted from trader's recommendation, explain why. If approved as-is, confirm the reasoning.)
+
 Use the format: {final_format}
 
 **CRITICAL:** Reject any proposal with >3% account risk or unclear exit strategy."""
@@ -188,11 +206,26 @@ Focus on actionable insights and continuous improvement. Build on past lessons, 
         # Extract the recommendation from the response
         trading_mode = trading_context["mode"]
         extracted_recommendation = extract_recommendation(response.content, trading_mode)
-        
-        # Format the final decision if extraction was successful
-        final_decision_content = response.content
+
+        # Extract approved position size from risk manager's analysis
+        from tradingagents.agents.utils.position_size_extractor import extract_position_size
+
+        approved_position_size = extract_position_size(
+            response.content,
+            account_info={"equity": equity, "buying_power": buying_power, "cash": cash}
+        )
+
+        # Format the final decision while preserving full risk analysis
         if extracted_recommendation:
-            final_decision_content = format_final_decision(extracted_recommendation, trading_mode)
+            # Pass full risk analysis to preserve it
+            final_decision_content = format_final_decision(
+                extracted_recommendation,
+                trading_mode,
+                full_analysis=response.content  # Preserve the full risk manager analysis
+            )
+        else:
+            # No recommendation extracted, keep original content
+            final_decision_content = response.content
 
         new_risk_debate_state = {
             "judge_decision": response.content,
@@ -216,6 +249,7 @@ Focus on actionable insights and continuous improvement. Build on past lessons, 
             "trading_mode": trading_mode,
             "current_position": current_position,
             "recommended_action": extracted_recommendation,
+            "approved_position_size": approved_position_size,  # NEW
         }
 
     return risk_manager_node

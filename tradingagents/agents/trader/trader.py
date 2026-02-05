@@ -59,10 +59,12 @@ def create_trader(llm, memory, config=None):
 
         buying_power = account_info.get("buying_power", 0.0)
         cash = account_info.get("cash", 0.0)
+        equity = account_info.get("equity", 0.0)
         daily_change_dollars = account_info.get("daily_change_dollars", 0.0)
         daily_change_percent = account_info.get("daily_change_percent", 0.0)
         account_status_desc = (
             "Account Status:\n"
+            f"- Account Equity: ${equity:,.2f}\n"
             f"- Buying Power: ${buying_power:,.2f}\n"
             f"- Cash: ${cash:,.2f}\n"
             f"- Daily Change: ${daily_change_dollars:,.2f} ({daily_change_percent:.2f}%)"
@@ -138,7 +140,23 @@ Your {decision_format} should be based on:
 - **Position Size:** Calculated based on daily volatility, not account size
 - **Time Horizon:** Expected overnight hold with daily reassessment
 
-Always conclude with: {final_format}
+**POSITION SIZING DECISION:**
+Based on the account status above:
+- Account Equity: ${equity:,.2f}
+- Buying Power: ${buying_power:,.2f}
+
+Determine the appropriate position size (1-3% account risk is recommended).
+Consider:
+- Stop loss distance from entry
+- Daily ATR (Average True Range) for volatility
+- Entry price level
+- Risk tolerance (max 3% of account equity)
+
+You MUST conclude with:
+RECOMMENDED POSITION SIZE: $X,XXX
+(Reasoning: explain your sizing logic based on risk and volatility)
+
+Then conclude with: {final_format}
 
 **CRITICAL:** Focus on EOD trading setups, not intraday scalping or long-term investments.
 
@@ -273,11 +291,26 @@ Provide a brief justification and conclude with: FINAL TRANSACTION PROPOSAL: **B
         # Extract the recommendation from the response
         trading_mode = trading_context["mode"]
         extracted_recommendation = extract_recommendation(result.content, trading_mode)
-        
-        # Format the final decision if extraction was successful
-        final_decision_content = result.content
+
+        # Extract position size recommendation from trader's analysis
+        from tradingagents.agents.utils.position_size_extractor import extract_position_size
+
+        trader_position_size = extract_position_size(
+            result.content,
+            account_info={"equity": equity, "buying_power": buying_power, "cash": cash}
+        )
+
+        # Format the final decision while preserving full analysis
         if extracted_recommendation:
-            final_decision_content = format_final_decision(extracted_recommendation, trading_mode)
+            # Pass full analysis to preserve it
+            final_decision_content = format_final_decision(
+                extracted_recommendation,
+                trading_mode,
+                full_analysis=result.content  # Preserve the full trader analysis
+            )
+        else:
+            # No recommendation extracted, keep original content
+            final_decision_content = result.content
 
         return {
             "messages": [result],
@@ -286,6 +319,7 @@ Provide a brief justification and conclude with: FINAL TRANSACTION PROPOSAL: **B
             "trading_mode": trading_mode,
             "current_position": current_position,
             "recommended_action": extracted_recommendation,
+            "recommended_position_size": trader_position_size,  # NEW
         }
 
     return functools.partial(trader_node, name="Trader")

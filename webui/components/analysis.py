@@ -11,28 +11,28 @@ from webui.utils.state import app_state
 from webui.utils.charts import create_chart
 
 
-def execute_trade_after_analysis(ticker, allow_shorts, trade_amount):
+def execute_trade_after_analysis(ticker, allow_shorts, trade_amount, use_ai_sizing=True):
     """Execute trade based on analysis results"""
     try:
         print(f"[TRADE] Starting trade execution for {ticker}")
-        
+
         # Get the current state for this symbol
         state = app_state.get_state(ticker)
         if not state:
             print(f"[TRADE] No state found for {ticker}, skipping trade execution")
             return
-            
+
         if not state.get("analysis_complete"):
             print(f"[TRADE] Analysis not complete for {ticker}, skipping trade execution")
             print(f"[TRADE] Analysis status: {state.get('analysis_complete', 'Unknown')}")
             return
-        
+
         print(f"[TRADE] Analysis complete for {ticker}, checking for recommended action")
-        
+
         # Get the recommended action
         recommended_action = state.get("recommended_action")
         print(f"[TRADE] Direct recommended_action: {recommended_action}")
-        
+
         if not recommended_action:
             # Try to extract from final trade decision
             final_decision = state["current_reports"].get("final_trade_decision")
@@ -42,24 +42,84 @@ def execute_trade_after_analysis(ticker, allow_shorts, trade_amount):
                 print(f"[TRADE] Extracting recommendation using mode: {trading_mode}")
                 recommended_action = extract_recommendation(final_decision, trading_mode)
                 print(f"[TRADE] Extracted recommendation: {recommended_action}")
-        
+
         if not recommended_action:
             print(f"[TRADE] No recommended action found for {ticker}, skipping trade execution")
             print(f"[TRADE] Available reports: {list(state['current_reports'].keys())}")
             return
-        
-        print(f"[TRADE] Executing trade for {ticker}: {recommended_action} with ${trade_amount}")
-        
+
+        # Determine position size (AI-determined or fixed)
+        actual_trade_amount = trade_amount  # Default to user-configured amount
+
+        if use_ai_sizing:
+            # Try to get AI-recommended position size from analysis results
+            analysis_results = state.get("analysis_results", {})
+            full_state = analysis_results.get("full_state", {})
+
+            # Priority: Risk Manager > Trader > Fallback
+            approved_size = full_state.get("approved_position_size", {})
+            trader_size = full_state.get("recommended_position_size", {})
+
+            ai_suggested_dollars = (
+                approved_size.get("recommended_size_dollars") or
+                trader_size.get("recommended_size_dollars") or
+                None
+            )
+
+            if ai_suggested_dollars and ai_suggested_dollars > 0:
+                # Get account info for validation
+                from tradingagents.agents.utils.position_size_extractor import validate_position_size
+                account_info = AlpacaUtils.get_account_info()
+
+                # Validation limits (configurable in future)
+                limits = {
+                    "max_position_pct_of_buying_power": 30,
+                    "max_risk_pct_per_trade": 3,
+                    "min_position_size": 100
+                }
+
+                # Validate AI-suggested size
+                validated_size = validate_position_size(
+                    ai_suggested_dollars,
+                    account_info,
+                    limits,
+                    ticker
+                )
+
+                # Apply user-configured maximum as safety cap
+                if validated_size > 0:
+                    actual_trade_amount = min(validated_size, trade_amount)
+                    print(f"[POSITION SIZE] AI recommended ${ai_suggested_dollars:,.2f}, validated to ${validated_size:,.2f}, capped at ${actual_trade_amount:,.2f}")
+
+                    # Log which agent's recommendation was used
+                    if approved_size.get("recommended_size_dollars"):
+                        print(f"[POSITION SIZE] Using Risk Manager's approved size")
+                    else:
+                        print(f"[POSITION SIZE] Using Trader's recommended size")
+                else:
+                    print(f"[POSITION SIZE] AI-suggested size failed validation, using fallback ${actual_trade_amount:,.2f}")
+            else:
+                # Extraction failed, use fallback
+                print(f"[POSITION SIZE] AI sizing extraction failed, using user-configured amount ${actual_trade_amount:,.2f}")
+                if approved_size.get("fallback_used"):
+                    print(f"[POSITION SIZE] Risk Manager extraction failed")
+                if trader_size.get("fallback_used"):
+                    print(f"[POSITION SIZE] Trader extraction failed")
+        else:
+            print(f"[POSITION SIZE] AI sizing disabled, using fixed amount ${actual_trade_amount:,.2f}")
+
+        print(f"[TRADE] Executing trade for {ticker}: {recommended_action} with ${actual_trade_amount:,.2f}")
+
         # Get current position
         current_position = AlpacaUtils.get_current_position_state(ticker)
         print(f"[TRADE] Current position for {ticker}: {current_position}")
-        
+
         # Execute the trading action
         result = AlpacaUtils.execute_trading_action(
             symbol=ticker,
             current_position=current_position,
             signal=recommended_action,
-            dollar_amount=trade_amount,
+            dollar_amount=actual_trade_amount,
             allow_shorts=allow_shorts
         )
         
@@ -107,7 +167,7 @@ def execute_trade_after_analysis(ticker, allow_shorts, trade_amount):
             state["trading_results"] = {"error": f"Trading execution error: {str(e)}"}
 
 
-def run_analysis(ticker, selected_analysts, research_depth, allow_shorts, quick_llm, deep_llm, progress=None):
+def run_analysis(ticker, selected_analysts, research_depth, allow_shorts, quick_llm, deep_llm, parallel_execution=True, progress=None):
     """Run the trading analysis using current/real-time data"""
     try:
         # Always use current date for real-time analysis
@@ -124,10 +184,9 @@ def run_analysis(ticker, selected_analysts, research_depth, allow_shorts, quick_
         
         # Create config with selected options
         config = DEFAULT_CONFIG.copy()
-        config["max_debate_rounds"] = research_depth
-        config["max_risk_discuss_rounds"] = research_depth
+        config["research_depth"] = research_depth  # Use research_depth string (Shallow/Medium/Deep)
         config["allow_shorts"] = allow_shorts
-        config["parallel_analysts"] = False  # Always use sequential execution
+        config["parallel_analysts"] = parallel_execution  # Use user's choice from UI toggle
         config["quick_think_llm"] = quick_llm
         config["deep_think_llm"] = deep_llm
         
@@ -194,14 +253,16 @@ def run_analysis(ticker, selected_analysts, research_depth, allow_shorts, quick_
         # Execute trade if enabled
         trade_enabled = getattr(app_state, 'trade_enabled', False)
         trade_amount = getattr(app_state, 'trade_amount', 1000)
+        use_ai_sizing = getattr(app_state, 'use_ai_sizing', True)  # Default to AI sizing enabled
         print(f"[TRADE] Checking trading settings for {ticker}:")
         print(f"[TRADE]   - trade_enabled: {trade_enabled}")
         print(f"[TRADE]   - trade_amount: {trade_amount}")
+        print(f"[TRADE]   - use_ai_sizing: {use_ai_sizing}")
         print(f"[TRADE]   - allow_shorts: {allow_shorts}")
-        
+
         if trade_enabled:
-            print(f"[TRADE] Trading enabled for {ticker}, executing trade with ${trade_amount}")
-            execute_trade_after_analysis(ticker, allow_shorts, trade_amount)
+            print(f"[TRADE] Trading enabled for {ticker}, executing trade with max ${trade_amount}")
+            execute_trade_after_analysis(ticker, allow_shorts, trade_amount, use_ai_sizing)
         else:
             print(f"[TRADE] Trading disabled for {ticker}, skipping trade execution")
         
@@ -223,7 +284,7 @@ def run_analysis(ticker, selected_analysts, research_depth, allow_shorts, quick_
 
 
 def start_analysis(ticker, analysts_market, analysts_social, analysts_news, analysts_fundamentals, analysts_macro,
-                 research_depth, allow_shorts, quick_llm, deep_llm, progress=None):
+                 research_depth, allow_shorts, quick_llm, deep_llm, parallel_execution=True, progress=None):
     """Start real-time analysis function for the UI"""
     
     # Parse selected analysts
@@ -241,15 +302,7 @@ def start_analysis(ticker, analysts_market, analysts_social, analysts_news, anal
     
     if not selected_analysts:
         return "Please select at least one analyst type."
-    
-    # Convert research depth to integer to match UI display values
-    if research_depth == "Shallow":
-        depth = 1
-    elif research_depth == "Medium":
-        depth = 3
-    else:  # Deep
-        depth = 5
-        
+
     # Create an initial chart immediately with current data
     try:
         print(f"Creating initial chart for {ticker} with current market data")
@@ -262,7 +315,7 @@ def start_analysis(ticker, analysts_market, analysts_social, analysts_news, anal
         traceback.print_exc()
     
     # Run analysis with current data
-    run_analysis(ticker, selected_analysts, depth, allow_shorts, quick_llm, deep_llm, progress)
+    run_analysis(ticker, selected_analysts, research_depth, allow_shorts, quick_llm, deep_llm, parallel_execution, progress)
     
     # Update the status message with more details
     trading_mode = "Trading Mode (LONG/NEUTRAL/SHORT)" if allow_shorts else "Investment Mode (BUY/HOLD/SELL)"

@@ -26,32 +26,32 @@ def register_control_callbacks(app):
         
         research_depth_info = {
             "Shallow": {
-                "description": "Quick research, few debate and strategy discussion rounds",
+                "description": "Quick research with minimal debate rounds",
                 "settings": [
-                    "max_debate_rounds: 1",
-                    "max_risk_discuss_rounds: 1"
+                    "Bull/Bear debate: 1 round (2 calls)",
+                    "Risk debate: 1 round (3 calls)"
                 ],
                 "use_case": "Fast analysis when you need quick results and don't require extensive deliberation between agents",
                 "header_color": "#17a2b8",  # info blue
                 "bg_color": "#d1ecf1"
             },
             "Medium": {
-                "description": "Middle ground, moderate debate rounds and strategy discussion",
+                "description": "Balanced research with moderate debate rounds",
                 "settings": [
-                    "max_debate_rounds: 3",
-                    "max_risk_discuss_rounds: 3"
+                    "Bull/Bear debate: 3 rounds (6 calls)",
+                    "Risk debate: 3 rounds (9 calls)"
                 ],
-                "use_case": "Balanced approach providing reasonable depth while maintaining efficiency",
+                "use_case": "Balanced approach providing reasonable depth while maintaining efficiency (recommended for most use cases)",
                 "header_color": "#ffc107",  # warning yellow
                 "bg_color": "#fff3cd"
             },
             "Deep": {
-                "description": "Comprehensive research, in depth debate and strategy discussion",
+                "description": "Comprehensive research with extensive debate rounds",
                 "settings": [
-                    "max_debate_rounds: 5",
-                    "max_risk_discuss_rounds: 5"
+                    "Bull/Bear debate: 5 rounds (10 calls)",
+                    "Risk debate: 5 rounds (15 calls)"
                 ],
-                "use_case": "Most thorough analysis with extensive agent debates and risk discussions",
+                "use_case": "Most thorough analysis with extensive agent debates and risk discussions (slowest but most comprehensive)",
                 "header_color": "#28a745",  # success green
                 "bg_color": "#d4edda"
             }
@@ -369,6 +369,67 @@ def register_control_callbacks(app):
         ])
 
     @app.callback(
+        Output("parallel-execution-info", "children"),
+        [Input("parallel-execution", "value")]
+    )
+    def update_parallel_execution_info(parallel_enabled):
+        """Update the parallel execution information display"""
+        if parallel_enabled:
+            return dbc.Card([
+                dbc.CardHeader([
+                    html.H6("Parallel Execution Enabled",
+                           className="mb-0",
+                           style={"fontWeight": "bold", "color": "white"})
+                ], style={"backgroundColor": "#28a745", "border": "none"}),
+                dbc.CardBody([
+                    html.P([
+                        html.Strong("Description: ", style={"color": "black"}),
+                        html.Span("All 5 analysts run concurrently for faster analysis", style={"color": "black"})
+                    ], className="mb-2"),
+                    html.P([
+                        html.Strong("Features:", style={"color": "black"}),
+                        html.Ul([
+                            html.Li("5x faster analyst phase execution", style={"color": "black"}),
+                            html.Li("Staggered starts to avoid API rate limits", style={"color": "black"}),
+                            html.Li("Built-in delays for OpenAI API compliance", style={"color": "black"}),
+                            html.Li("Real-time status updates for all agents", style={"color": "black"})
+                        ], className="mb-1")
+                    ], className="mb-2"),
+                    html.P([
+                        html.Strong("Note: ", style={"color": "black"}),
+                        html.Span("Recommended for production use", style={"color": "black"})
+                    ], className="mb-0")
+                ], style={"backgroundColor": "#d4edda"})
+            ])
+        else:
+            return dbc.Card([
+                dbc.CardHeader([
+                    html.H6("Sequential Execution",
+                           className="mb-0",
+                           style={"fontWeight": "bold", "color": "white"})
+                ], style={"backgroundColor": "#6c757d", "border": "none"}),
+                dbc.CardBody([
+                    html.P([
+                        html.Strong("Description: ", style={"color": "black"}),
+                        html.Span("Analysts run one after another in sequence", style={"color": "black"})
+                    ], className="mb-2"),
+                    html.P([
+                        html.Strong("Features:", style={"color": "black"}),
+                        html.Ul([
+                            html.Li("Slower execution (analysts wait for each other)", style={"color": "black"}),
+                            html.Li("Lower API rate pressure", style={"color": "black"}),
+                            html.Li("Easier to debug individual analyst issues", style={"color": "black"}),
+                            html.Li("Better for API key rate limit constraints", style={"color": "black"})
+                        ], className="mb-1")
+                    ], className="mb-2"),
+                    html.P([
+                        html.Strong("Note: ", style={"color": "black"}),
+                        html.Span("Use for debugging or rate limit concerns", style={"color": "black"})
+                    ], className="mb-0")
+                ], style={"backgroundColor": "#f8f9fa"})
+            ])
+
+    @app.callback(
         Output("trade-after-analyze-info", "children"),
         [Input("trade-after-analyze", "value"),
          Input("trade-dollar-amount", "value")]
@@ -451,13 +512,15 @@ def register_control_callbacks(app):
          State("loop-interval", "value"),
          State("trade-after-analyze", "value"),
          State("trade-dollar-amount", "value"),
+         State("ai-position-sizing", "value"),
          State("market-hour-enabled", "value"),
-         State("market-hours-input", "value")]
+         State("market-hours-input", "value"),
+         State("parallel-execution", "value")]
     )
-    def on_control_button_click(n_clicks, button_children, tickers, analysts_market, analysts_social, analysts_news, 
-                               analysts_fundamentals, analysts_macro, research_depth, quick_llm, deep_llm, 
-                               allow_shorts, loop_enabled, loop_interval, trade_enabled, trade_amount,
-                               market_hour_enabled, market_hours_input):
+    def on_control_button_click(n_clicks, button_children, tickers, analysts_market, analysts_social, analysts_news,
+                               analysts_fundamentals, analysts_macro, research_depth, quick_llm, deep_llm,
+                               allow_shorts, loop_enabled, loop_interval, trade_enabled, trade_amount, use_ai_sizing,
+                               market_hour_enabled, market_hours_input, parallel_execution):
         """Handle control button clicks"""
         # Detect which property triggered this callback
         triggered_prop = None
@@ -519,6 +582,7 @@ def register_control_callbacks(app):
         # Store trading configuration
         app_state.trade_enabled = trade_enabled
         app_state.trade_amount = trade_amount if trade_amount and trade_amount > 0 else 1000
+        app_state.use_ai_sizing = use_ai_sizing if use_ai_sizing is not None else True  # Default to True
         
         # Validate market hour configuration if enabled
         if market_hour_enabled:
@@ -547,7 +611,8 @@ def register_control_callbacks(app):
                     'quick_llm': quick_llm,
                     'deep_llm': deep_llm,
                     'trade_enabled': trade_enabled,
-                    'trade_amount': trade_amount
+                    'trade_amount': trade_amount,
+                    'parallel_execution': parallel_execution
                 }
                 app_state.start_market_hour_mode(symbols, market_hour_config, market_hours_list)
                 
@@ -602,7 +667,7 @@ def register_control_callbacks(app):
                             start_analysis(
                                 symbol,
                                 analysts_market, analysts_social, analysts_news, analysts_fundamentals, analysts_macro,
-                                research_depth, allow_shorts, quick_llm, deep_llm
+                                research_depth, allow_shorts, quick_llm, deep_llm, parallel_execution
                             )
                             
                             if app_state.stop_market_hour:
@@ -624,7 +689,8 @@ def register_control_callbacks(app):
                     'quick_llm': quick_llm,
                     'deep_llm': deep_llm,
                     'trade_enabled': trade_enabled,
-                    'trade_amount': trade_amount
+                    'trade_amount': trade_amount,
+                    'parallel_execution': parallel_execution
                 }
                 app_state.start_loop(symbols, loop_config)
                 
@@ -643,7 +709,7 @@ def register_control_callbacks(app):
                             start_analysis(
                                 symbol,
                                 analysts_market, analysts_social, analysts_news, analysts_fundamentals, analysts_macro,
-                                research_depth, allow_shorts, quick_llm, deep_llm
+                                research_depth, allow_shorts, quick_llm, deep_llm, parallel_execution
                             )
                     
                     if app_state.stop_loop:
@@ -676,7 +742,7 @@ def register_control_callbacks(app):
                         start_analysis(
                             symbol,
                             analysts_market, analysts_social, analysts_news, analysts_fundamentals, analysts_macro,
-                            research_depth, allow_shorts, quick_llm, deep_llm
+                            research_depth, allow_shorts, quick_llm, deep_llm, parallel_execution
                         )
             
             app_state.analysis_running = False

@@ -84,6 +84,20 @@ def create_config_panel():
                     html.Div(id="trading-mode-info", className="mb-3"),
                 ], width=6),
             ]),
+            html.H5("Execution Mode:", className="mt-3"),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Switch(
+                        id="parallel-execution",
+                        label="Enable Parallel Analyst Execution",
+                        value=False,  # Default to disabled for more reliable execution
+                        className="mb-2"
+                    ),
+                ], width=6),
+                dbc.Col([
+                    html.Div(id="parallel-execution-info", className="mb-3"),
+                ], width=6),
+            ]),
             html.H5("Scheduling Configuration:", className="mt-3"),
             dbc.Row([
                 dbc.Col([
@@ -142,7 +156,22 @@ def create_config_panel():
                     ),
                 ], width=6),
                 dbc.Col([
-                    dbc.Label("Order Amount ($)", className="mb-1"),
+                    dbc.Switch(
+                        id="ai-position-sizing",
+                        label="AI-Determined Position Sizing",
+                        value=True,  # Default enabled
+                        className="mb-2"
+                    ),
+                ], width=6),
+            ]),
+            html.Small("AI agents determine trade size based on risk analysis", className="text-muted mb-2"),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Label("Max Order Amount ($)", className="mb-1"),
+                    html.Small(
+                        "When AI sizing enabled: acts as maximum cap. When disabled: fixed trade amount.",
+                        className="text-muted d-block mb-1"
+                    ),
                     dbc.Input(
                         id="trade-dollar-amount",
                         type="number",
@@ -152,7 +181,7 @@ def create_config_panel():
                         max=10000000,
                         className="mb-2"
                     ),
-                ], width=6),
+                ], width=12),
             ]),
             # Add trading mode information display
             html.Div(id="trade-after-analyze-info", className="mb-3"),
@@ -160,6 +189,8 @@ def create_config_panel():
             dbc.Select(
                 id="quick-llm",
                 options=[
+                    {"label": "gpt-5.2-2025-12-11", "value": "gpt-5.2-2025-12-11"},
+                    {"label": "gpt-5-mini-2025-08-07", "value": "gpt-5-mini-2025-08-07"},
                     {"label": "gpt-5", "value": "gpt-5"},
                     {"label": "gpt-5-mini", "value": "gpt-5-mini"},
                     {"label": "gpt-5-nano", "value": "gpt-5-nano"},
@@ -172,13 +203,15 @@ def create_config_panel():
                     {"label": "o3", "value": "o3"},
                     {"label": "o1", "value": "o1"},
                 ],
-                value="gpt-5-nano",
+                value="gpt-5-mini-2025-08-07",
                 className="mb-2"
             ),
             html.H5("LLM Deep Thinker Model:", className="mt-3"),
             dbc.Select(
                 id="deep-llm",
                 options=[
+                    {"label": "gpt-5.2-2025-12-11", "value": "gpt-5.2-2025-12-11"},
+                    {"label": "gpt-5-mini-2025-08-07", "value": "gpt-5-mini-2025-08-07"},
                     {"label": "gpt-5", "value": "gpt-5"},
                     {"label": "gpt-5-mini", "value": "gpt-5-mini"},
                     {"label": "gpt-5-nano", "value": "gpt-5-nano"},
@@ -191,7 +224,7 @@ def create_config_panel():
                     {"label": "o3", "value": "o3"},
                     {"label": "o1", "value": "o1"},
                 ],
-                value="gpt-5-nano",
+                value="gpt-5.2-2025-12-11",
                 className="mb-3"
             ),
             # Dynamic Start/Stop button

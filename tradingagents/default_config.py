@@ -9,18 +9,26 @@ DEFAULT_CONFIG = {
         "dataflows/data_cache",
     ),
     # LLM settings
-    "deep_think_llm": "o3-mini",
-    "quick_think_llm": "gpt-4o-mini",
-    # Debate and discussion settings
-    "max_debate_rounds": 4,
-    "max_risk_discuss_rounds": 3,
+    "deep_think_llm": "gpt-5.2-2025-12-11",
+    "quick_think_llm": "gpt-5-mini-2025-08-07",  # Supports web search via responses.create()
+    # Research depth settings - controls debate rounds for both investment and risk analysis
+    # Options: "shallow" (1 round), "medium" (3 rounds), "deep" (5 rounds)
+    "research_depth": "medium",  # shallow = fast, medium = balanced, deep = thorough
+    # Legacy settings (deprecated - use research_depth instead)
+    "max_debate_rounds": None,  # Will be set based on research_depth if None
+    "max_risk_discuss_rounds": None,  # Will be set based on research_depth if None
     "max_recur_limit": 200,
     # Trading settings
     "allow_shorts": False,  # False = Investment mode (BUY/HOLD/SELL), True = Trading mode (LONG/NEUTRAL/SHORT)
+    # Position sizing settings
+    "ai_position_sizing": True,  # True = AI determines position size, False = fixed amount
+    "max_position_pct_of_buying_power": 30,  # Maximum % of buying power per trade
+    "max_risk_pct_per_trade": 3,  # Maximum % account risk per trade
+    "min_position_size": 100,  # Minimum position size in dollars
     # Execution settings
-    "parallel_analysts": True,  # True = Run analysts in parallel for faster execution, False = Sequential execution
-    # Tool settings
-    "online_tools": True,
+    "parallel_analysts": False,  # False = Sequential execution (more reliable), True = Parallel execution (faster)
+    # Tool settings (DEPRECATED: All tools now use smart caching automatically)
+    "online_tools": True,  # DEPRECATED - Tools automatically check cache first, then use API. This flag is ignored.
     # API keys (these will be overridden by environment variables if present)
     "openai_api_key": None,
     "finnhub_api_key": None,
