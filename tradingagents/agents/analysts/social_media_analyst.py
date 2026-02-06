@@ -28,35 +28,35 @@ def create_social_media_analyst(llm, toolkit):
             ]
 
         system_message = (
-            "You are an EOD TRADING social media analyst specializing in identifying sentiment shifts and social catalysts that could drive overnight and next-day price movements. "
-            "Your role is to analyze social media posts, community sentiment, and social momentum indicators that create EOD trading opportunities.\n\n"
-            "**EOD TRADING SOCIAL MEDIA FOCUS:**\n"
-            "1. **End-of-Day Sentiment:** Social sentiment changes during final trading hours that often precede overnight gaps\n"
-            "2. **After-Hours Catalysts:** Social media events, influencer mentions, trending hashtags driving overnight momentum\n"
-            "3. **Community Positioning:** Reddit, Twitter sentiment shifts indicating retail trader positioning for next day\n"
-            "4. **Buzz Intensity:** Volume and urgency of social discussions suggesting overnight or pre-market moves\n"
-            "5. **Social Contrarian Signals:** Extreme social sentiment indicating potential overnight reversals\n"
-            "6. **Timing Indicators:** Social media activity patterns that correlate with next-day price volatility\n\n"
-            "**EOD TRADING ANALYSIS REQUIREMENTS:**\n"
-            "- **Sentiment Direction:** Current bullish/bearish/neutral social sentiment with intraday changes\n"
-            "- **Momentum Indicators:** Social volume, engagement rates, viral potential for overnight moves\n"
-            "- **Key Influencers:** Important social media accounts or communities driving end-of-day sentiment\n"
-            "- **Contrarian Opportunities:** Over-extended social sentiment suggesting overnight mean reversion\n"
-            "- **Event Catalysts:** Social media events or announcements with overnight trading implications\n"
-            "- **Risk Factors:** Social media risks that could impact overnight positions negatively\n\n"
-            "**AVOID:** Long-term sentiment trends, fundamental analysis, intraday noise. Focus on social factors "
-            "that create actionable EOD trading opportunities for overnight positioning.\n\n"
-            "Provide comprehensive social media sentiment analysis that EOD traders can use for entry/exit timing and "
-            "overnight position sizing decisions. Always include specific social media examples and sentiment metrics when available."
+            "You are a SWING TRADING social media analyst specializing in identifying sentiment shifts and social catalysts that could drive multi-day price movements. "
+            "Your role is to analyze social media posts, community sentiment, and social momentum indicators that affect swing trading positions (2-10 day holds).\n\n"
+            "**SWING TRADING SOCIAL MEDIA FOCUS:**\n"
+            "1. **Trending Sentiment:** Social sentiment trends that could sustain or reverse a multi-day price swing\n"
+            "2. **Sustained Catalysts:** Influencer mentions, viral campaigns, or trending hashtags with multi-day momentum\n"
+            "3. **Community Positioning:** Reddit, Twitter sentiment indicating retail trader conviction over the coming days\n"
+            "4. **Buzz Persistence:** Volume and duration of social discussions suggesting sustained moves vs. short-lived spikes\n"
+            "5. **Social Contrarian Signals:** Extreme social sentiment indicating potential multi-day reversals\n"
+            "6. **Narrative Durability:** How long the current social narrative is likely to persist and drive price action\n\n"
+            "**SWING TRADING ANALYSIS REQUIREMENTS:**\n"
+            "- **Sentiment Direction:** Current bullish/bearish/neutral social sentiment with recent trend\n"
+            "- **Momentum Indicators:** Social volume, engagement rates, viral potential for multi-day moves\n"
+            "- **Key Influencers:** Important social media accounts or communities driving sentiment shifts\n"
+            "- **Contrarian Opportunities:** Over-extended social sentiment suggesting mean reversion swings\n"
+            "- **Event Catalysts:** Social media events or announcements with multi-day trading implications\n"
+            "- **Risk Factors:** Social media risks that could impact swing positions negatively\n\n"
+            "**AVOID:** Intraday noise, one-off viral spikes with no follow-through. Focus on social factors "
+            "that create sustained multi-day moves relevant to swing trading.\n\n"
+            "Provide comprehensive social media sentiment analysis that swing traders can use for entry/exit timing and "
+            "position sizing decisions. Always include specific social media examples and sentiment metrics when available."
             + """ 
 
-**EOD TRADING SOCIAL SENTIMENT TABLE:**
+**SWING TRADING SOCIAL SENTIMENT TABLE:**
 Make sure to append a Markdown table organizing:
-| Social Platform | Sentiment | Volume | Change (EOD) | EOD Trading Signal |
-|-----------------|-----------|---------|--------------|-------------------|
-| [Platform] | [Bullish/Bearish/Neutral] | [High/Med/Low] | [Direction & %] | [Enter/Exit/Hold Strategy] |
+| Social Platform | Sentiment | Volume | Trend (Multi-Day) | Swing Trading Signal |
+|-----------------|-----------|---------|-------------------|---------------------|
+| [Platform] | [Bullish/Bearish/Neutral] | [High/Med/Low] | [Direction & Duration] | [Enter/Exit/Hold Strategy] |
 
-Focus on actionable social sentiment insights for EOD trading decisions."""
+Focus on actionable social sentiment insights for swing trading decisions."""
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -170,17 +170,17 @@ For your reference, the current date is {current_date}. The current company we w
         # Check if we have substantial analysis content (not just final proposal)
         if len(analysis_content.strip()) < 100 or "FINAL TRANSACTION PROPOSAL:" in analysis_content and len(analysis_content.replace("FINAL TRANSACTION PROPOSAL:", "").strip()) < 100:
             # Generate fallback analysis if content is too short
-            fallback_prompt = f"""As a EOD trading social media analyst, provide a comprehensive social sentiment analysis for {ticker} on {current_date}.
+            fallback_prompt = f"""As a swing trading social media analyst, provide a comprehensive social sentiment analysis for {ticker} on {current_date}.
 
 Since detailed social media data may not be available, provide a professional analysis covering:
 1. **General Social Sentiment Trends** for {ticker}
 2. **Social Media Momentum Indicators** 
 3. **Community Positioning Analysis**
-4. **EOD Trading Social Signals**
+4. **Swing Trading Social Signals**
 5. **Risk Factors from Social Sentiment**
 
-Include the required social sentiment table and conclude with EOD trading implications.
-Focus on actionable insights for overnight and next-day trading decisions."""
+Include the required social sentiment table and conclude with swing trading implications.
+Focus on actionable insights for multi-day (2-10 day) swing trading decisions."""
             
             fallback_result = llm.invoke(fallback_prompt)
             analysis_content = fallback_result.content if hasattr(fallback_result, 'content') else str(fallback_result)
@@ -188,7 +188,7 @@ Focus on actionable insights for overnight and next-day trading decisions."""
         # Ensure we have a final recommendation
         if "FINAL TRANSACTION PROPOSAL:" not in analysis_content:
             # Create a final recommendation based on the analysis
-            final_prompt = f"""Based on the following social media and sentiment analysis for {ticker}, provide your final EOD trading recommendation considering social momentum and sentiment indicators.
+            final_prompt = f"""Based on the following social media and sentiment analysis for {ticker}, provide your final swing trading recommendation considering social momentum and sentiment indicators.
 
 Analysis:
 {analysis_content}

@@ -429,8 +429,8 @@ class Toolkit:
                     results.append(f"**{ind}:** Error - {str(e)}")
             
             results.append("")
-            results.append("## EOD Trading Analysis")
-            results.append("These indicators provide key signals for end-of-day trading decisions:")
+            results.append("## Swing Trading Analysis")
+            results.append("These indicators provide key signals for swing trading decisions (2-10 day holds):")
             results.append("- **EMAs/SMAs:** Trend direction and support/resistance levels")
             results.append("- **RSI:** Overbought (>70) or oversold (<30) conditions")  
             results.append("- **MACD:** Momentum and trend change signals")
@@ -862,7 +862,7 @@ class Toolkit:
     ) -> str:
         """
         Retrieve comprehensive stock data table for a given ticker symbol over a lookback period.
-        Returns a clean table with Date, Open, High, Low, Close, Volume, VWAP columns for EOD trading analysis.
+        Returns a clean table with Date, Open, High, Low, Close, Volume, VWAP columns for swing trading analysis.
         
         Args:
             symbol (str): Ticker symbol of the company, e.g. AAPL, NVDA
@@ -931,9 +931,9 @@ class Toolkit:
             str: A comprehensive table containing Date and all technical indicators for the lookback period
         """
         
-        # Define the key indicators optimized for EOD trading
+        # Define the key indicators optimized for swing trading
         key_indicators = [
-            'close_8_ema',      # 8-day EMA (faster trend detection for EOD)
+            'close_8_ema',      # 8-day EMA (faster trend detection for swing trading)
             'close_21_ema',     # 21-day EMA (key swing level)
             'close_50_sma',     # 50-day SMA (major trend)
             'rsi_14',           # 14-day RSI (optimal for daily signals)
@@ -942,8 +942,8 @@ class Toolkit:
             'macdh',            # MACD Histogram
             'boll_ub',          # Bollinger Upper (20,2 default)
             'boll_lb',          # Bollinger Lower (20,2 default)
-            'kdjk_9',           # Stochastic %K (9-period for EOD)
-            'kdjd_9',           # Stochastic %D (9-period for EOD)
+            'kdjk_9',           # Stochastic %K (9-period)
+            'kdjd_9',           # Stochastic %D (9-period)
             'wr_14',            # Williams %R (14-period)
             'atr_14',           # ATR (14-period for position sizing)
             'obv'               # On-Balance Volume (volume confirmation)
@@ -960,7 +960,7 @@ class Toolkit:
         results = []
         results.append(f"# Technical Indicators Table for {symbol}")
         results.append(f"**Period:** {start_dt.strftime('%Y-%m-%d')} to {curr_date} ({look_back_days} days lookback)")
-        results.append(f"**Showing:** Last 25 trading days for EOD analysis")
+        results.append(f"**Showing:** Last 25 trading days for swing trading analysis")
         results.append("")
         
         # Create table header
@@ -1185,7 +1185,7 @@ class Toolkit:
                 results.append(table_row)
         
         results.append("")
-        results.append("## Key EOD Trading Signals Analysis:")
+        results.append("## Key Swing Trading Signals Analysis:")
         results.append("- **Trend Structure:** 8-EMA > 21-EMA > 50-SMA = Strong uptrend | Price above all EMAs = Bullish")
         results.append("- **Momentum:** RSI 30-50 = Accumulation zone | RSI 50-70 = Trending | RSI >70 = Overbought")
         results.append("- **MACD Signals:** MACD > Signal = Bullish momentum | Histogram growing = Acceleration")
@@ -1194,6 +1194,30 @@ class Toolkit:
         results.append("- **Williams %R:** Values -20 to -80 = Normal range | Below -80 = Oversold (buy) | Above -20 = Overbought (sell)")
         results.append("- **ATR:** Use for position sizing (1-2x ATR for stop loss) | Higher ATR = More volatile")
         results.append("")
-        results.append("**EOD Strategy:** Look for trend + momentum + volume confirmation for overnight positions")
+        results.append("**Swing Strategy:** Look for multi-timeframe trend + momentum + volume confirmation for 2-10 day positions")
         
         return "\n".join(results)
+
+    @staticmethod
+    @tool
+    @timing_wrapper("MARKET")
+    def get_technical_brief(
+        symbol: Annotated[str, "ticker symbol (stocks: AAPL, NVDA; crypto: ETH/USD, BTC/USD)"],
+        curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
+    ) -> str:
+        """
+        Get a standardized Technical Brief with pre-analyzed TA across 1h / 4h / 1d timeframes.
+
+        Returns compact structured JSON containing:
+        - trend: direction + strength per timeframe
+        - momentum: RSI zone, divergence flags, MACD cross
+        - vwap_state: above/below + zscore distance
+        - volatility: ATR percentile, Bollinger squeeze/breakout
+        - market_structure: BOS/CHOCH + last swing points
+        - key_levels: 3-5 important cross-timeframe price levels
+        - signal_summary: classified setup (breakout/pullback/mean_reversion/trend_continuation) + confidence
+
+        This is optimized for LLM consumption -- all indicator interpretation is
+        done deterministically so the LLM receives pre-digested conclusions.
+        """
+        return interface.get_technical_brief(symbol, curr_date)

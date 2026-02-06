@@ -36,28 +36,28 @@ def create_news_analyst(llm, toolkit):
                 ]
 
         system_message = (
-            f"You are an EOD TRADING news analyst specializing in identifying news events and market developments that could drive overnight and next-day price movements for {ticker}. Focus on after-hours catalysts and sentiment shifts that create EOD trading opportunities."
-            + " **EOD TRADING NEWS ANALYSIS:** \n"
-            + "1. **Overnight Catalyst Identification:** After-hours events, announcements, data releases that could create next-day gaps or moves \n"
-            + "2. **End-of-Day Sentiment Shifts:** Changes in market narrative, analyst sentiment, or sector rotation trends affecting overnight positions \n"
-            + "3. **Event Timing:** Specific dates/times for earnings, FDA approvals, product launches, economic data that EOD traders should know \n"
-            + "4. **After-Hours Momentum Drivers:** Breaking news creating overnight price momentum suitable for next-day positioning \n"
-            + "5. **Overnight Risk Events:** Geopolitical developments, Fed decisions, sector-specific risks that could impact overnight positions \n"
-            + "6. **Pre-Market Analysis:** How similar companies are reacting to news - sector momentum and relative strength patterns for next day \n"
+            f"You are a SWING TRADING news analyst specializing in identifying news events and market developments that could drive multi-day price movements for {ticker}. Focus on catalysts and sentiment shifts that affect swing trading positions (2-10 day holds)."
+            + " **SWING TRADING NEWS ANALYSIS:** \n"
+            + "1. **Multi-Day Catalyst Identification:** Events, announcements, and data releases that could sustain price trends over 2-10 days \n"
+            + "2. **Sentiment Trends:** Changes in market narrative, analyst sentiment, or sector rotation that persist across multiple days \n"
+            + "3. **Event Calendar:** Specific dates for earnings, FDA approvals, product launches, economic data during the swing holding period \n"
+            + "4. **Momentum Drivers:** News creating sustained multi-day price momentum suitable for swing positioning \n"
+            + "5. **Swing Risk Events:** Upcoming geopolitical developments, Fed decisions, sector-specific risks during the holding period \n"
+            + "6. **Sector & Relative Strength:** How similar companies and the broader sector are trending — multi-day momentum patterns \n"
             + "**ANALYSIS PRIORITIES:** \n"
-            + "- Focus on actionable news with clear timing implications for overnight trades \n"
-            + "- Identify both bullish and bearish catalysts affecting next trading day \n"
-            + "- Assess news impact magnitude (minor <2%, moderate 2-5%, major >5% overnight/next-day moves) \n"
-            + "- Consider news durability (will impact persist through next day or just overnight?) \n"
-            + "- Analyze market reaction patterns to similar news in overnight/pre-market sessions \n"
+            + "- Focus on news that could sustain or reverse a multi-day price swing \n"
+            + "- Identify both bullish and bearish catalysts over the coming 2-10 trading days \n"
+            + "- Assess news impact magnitude (minor <2%, moderate 2-5%, major >5% multi-day moves) \n"
+            + "- Consider news durability (will impact persist through the swing period?) \n"
+            + "- Analyze market reaction patterns to similar news for multi-day follow-through \n"
             + f"**IMPORTANT:** When using get_global_news_openai, ALWAYS pass ticker_context='{ticker}' to get {('crypto-relevant global news (regulation, institutional adoption, DeFi developments)' if is_crypto else 'sector-relevant global news')} instead of generic macro news.\n"
-            + "**AVOID:** Generic market commentary, long-term trends, intraday noise. Focus on EOD-relevant news with overnight impact potential.\n"
+            + "**AVOID:** Generic market commentary, intraday noise. Focus on news with multi-day impact potential relevant to swing trades.\n"
             + """ Make sure to append a Markdown table at the end organizing:
-| News Event | Date/Time | Impact Level | Price Direction | EOD Trading Implication |
+| News Event | Date/Time | Impact Level | Price Direction | Swing Trading Implication |
 |------------|-----------|--------------|----------------|------------------------|\n
 | [Specific Event] | [Date/Time] | [High/Med/Low] | [Bullish/Bearish/Neutral] | [Entry/Exit/Hold Strategy] |
 
-Provide specific, actionable news analysis for EOD trading decisions with clear timing and impact assessment."""
+Provide specific, actionable news analysis for swing trading decisions with clear timing and multi-day impact assessment."""
         )
 
         prompt = ChatPromptTemplate.from_messages(

@@ -99,29 +99,30 @@ def create_trader(llm, memory, config=None):
         trader_context = f"""
 {agent_context}
 
-**EOD TRADER DECISION MAKING:**
-As the EOD Trader, you specialize in making trading decisions at market close for overnight positions. You focus on:
+**SWING TRADER DECISION MAKING:**
+As the Swing Trader, you specialize in capturing multi-day price moves (2-10 day holding period). You focus on:
 
-**EOD TRADING METHODOLOGY:**
-- **Decision Timing:** Make all trading decisions during the final 10 minutes of market hours (3:50-4:00 PM ET)
-- **Entry Strategy:** Based on daily closing prices, EOD momentum, and after-hours setup
-- **Exit Strategy:** Daily reassessment at market close, gap management at next day's open
+**SWING TRADING METHODOLOGY:**
+- **Holding Period:** 2-10 trading days, targeting intermediate swing moves
+- **Entry Strategy:** Based on multi-timeframe confluence (1h/4h/1d), pullbacks to support, or breakout setups
+- **Exit Strategy:** Predefined swing targets at key resistance/support levels, or trailing stops
 - **Risk Management:** Risk 1-3% per trade, target 3-9% returns (2:1 to 3:1 R/R)
-- **Position Sizing:** Based on daily volatility (ATR) and overnight gap risk
+- **Position Sizing:** Based on ATR-derived stop distance and account risk tolerance
 
-**EOD TRADING DECISION CRITERIA:**
-1. **Daily Technical Setup:** Daily closing patterns, EOD momentum, and key level breaks
-2. **End-of-Day Volume:** Volume confirmation from full trading session completion
-3. **Risk/Reward:** Minimum 2:1 risk-reward ratio based on daily price ranges
-4. **Overnight Catalysts:** News events, earnings, or announcements affecting next day
-5. **Daily Market Context:** End-of-day market sentiment and overnight positioning
-6. **Gap Risk Assessment:** Potential for overnight gaps and pre-market volatility
+**SWING TRADING DECISION CRITERIA:**
+1. **Multi-Timeframe Setup:** 1h/4h/1d trend alignment and confluence at key levels
+2. **Volume Confirmation:** Volume supporting breakouts, reversals, or trend continuation
+3. **Risk/Reward:** Minimum 2:1 risk-reward ratio based on swing targets
+4. **Catalyst Awareness:** Earnings, macro events, or news during the planned holding period
+5. **Market Structure:** Break of structure, change of character, and swing point analysis
+6. **Volatility Assessment:** ATR percentile and Bollinger squeeze/breakout signals
 
 **POSITION MANAGEMENT:**
-- Enter positions at market close or prepare for next day's open
-- Daily stop loss and target reassessment at market close
-- Manage overnight news and pre-market risk exposure
-- Never risk more than 3% on any single EOD trade
+- Enter at key technical levels with multi-timeframe confirmation
+- Use ATR-based stops (1.5-2x ATR below entry for longs)
+- Trail stops as trade moves in your favor
+- Monitor daily but avoid overreacting to intraday noise
+- Never risk more than 3% on any single swing trade
 
 Current Alpaca Position Status:
 {open_pos_desc}
@@ -132,23 +133,23 @@ Alpaca Account Status:
 {account_status_desc}
 
 Your {decision_format} should be based on:
-- **Entry Point:** Specific price level for EOD entry or next day's open
-- **Target Price:** Realistic profit target based on daily ranges and resistance levels
-- **Stop Loss:** Maximum acceptable loss point (below daily support levels)
-- **Position Size:** Calculated based on daily volatility, not account size
-- **Time Horizon:** Expected overnight hold with daily reassessment
+- **Entry Point:** Specific price level for swing entry based on technical levels
+- **Target Price:** Realistic swing target based on key resistance/support levels
+- **Stop Loss:** ATR-based or below key swing low/high (1.5-2x ATR)
+- **Position Size:** Calculated from stop distance and max risk per trade
+- **Time Horizon:** Expected 2-10 day hold with daily monitoring
 
 Always conclude with: {final_format}
 
-**CRITICAL:** Focus on EOD trading setups, not intraday scalping or long-term investments.
+**CRITICAL:** Focus on swing trading setups, not intraday scalping or long-term investments.
 
-**ANALYSIS REQUIREMENT:** Provide comprehensive EOD trading analysis including:
-1. **Daily Technical Setup** - End-of-day patterns, daily chart analysis, key levels
-2. **Entry Strategy** - Specific EOD entry points and overnight positioning
-3. **Risk Management** - Stop loss placement and daily volatility-based sizing
-4. **Profit Targets** - Realistic targets based on daily ranges and technical levels
-5. **Overnight Risk** - Assessment of news risk and pre-market factors
-6. **Daily Context** - How market close conditions affect overnight positioning"""
+**ANALYSIS REQUIREMENT:** Provide comprehensive swing trading analysis including:
+1. **Multi-Timeframe Setup** - 1h/4h/1d alignment, trend structure, key levels
+2. **Entry Strategy** - Specific entry points with confirmation criteria
+3. **Risk Management** - ATR-based stop loss placement and position sizing
+4. **Profit Targets** - Swing targets based on resistance levels and measured moves
+5. **Holding Period Risk** - Assessment of events/catalysts during the swing window
+6. **Market Context** - How broader trend and macro conditions support the trade"""
 
         # Enhanced content validation for investment plan
         plan_content = investment_plan if investment_plan else ""
@@ -156,7 +157,7 @@ Always conclude with: {final_format}
         # Check if investment plan is substantial enough
         if len(plan_content.strip()) < 150 or ("FINAL TRANSACTION PROPOSAL:" in plan_content and len(plan_content.replace("FINAL TRANSACTION PROPOSAL:", "").strip()) < 100):
             # Generate enhanced analysis prompt when investment plan is insufficient
-            enhanced_prompt = f"""As a EOD Trader specializing in overnight positions, provide a comprehensive trading plan for {company_name}.
+            enhanced_prompt = f"""As a Swing Trader specializing in multi-day positions (2-10 days), provide a comprehensive trading plan for {company_name}.
 
 **AVAILABLE ANALYSIS:**
 Market Analysis: {market_research_report[:500] if market_research_report else 'Limited data available'}
@@ -165,28 +166,28 @@ News Analysis: {news_report[:300] if news_report else 'Limited data available'}
 Fundamentals: {fundamentals_report[:300] if fundamentals_report else 'Limited data available'}
 Macro Analysis: {macro_report[:300] if macro_report else 'Limited data available'}
 
-**REQUIRED EOD TRADING PLAN:**
+**REQUIRED SWING TRADING PLAN:**
 Provide a detailed analysis covering:
-1. **Technical Setup Analysis** - Current chart patterns, support/resistance levels
-2. **EOD Trading Entry Strategy** - Specific entry points and confirmation signals  
-3. **Risk Management Plan** - Stop loss levels, position sizing methodology
-4. **Profit Target Strategy** - Realistic targets based on technical levels
-5. **Time Horizon Assessment** - Expected overnight hold rationale
-6. **Market Context Integration** - How macro/news/sentiment affects the setup
+1. **Multi-Timeframe Setup** - 1h/4h/1d alignment, key levels, trend structure
+2. **Swing Entry Strategy** - Specific entry points, pullback or breakout criteria
+3. **Risk Management Plan** - ATR-based stop loss, position sizing methodology
+4. **Swing Target Strategy** - Realistic multi-day targets based on key levels
+5. **Time Horizon Assessment** - Expected 2-10 day hold rationale
+6. **Market Context Integration** - How macro/news/sentiment affects the swing setup
 
 **TRADING DECISION TABLE:**
 Include a markdown table with:
 | Aspect | Details |
 |--------|---------|
 | Entry Price | $X.XX (specific level) |
-| Stop Loss | $X.XX (risk management) |
-| Target 1 | $X.XX (first resistance) |
+| Stop Loss | $X.XX (ATR-based or below swing low) |
+| Target 1 | $X.XX (first swing target) |
 | Target 2 | $X.XX (extended target) |
 | Risk/Reward | X:1 ratio |
 | Position Size | X shares (based on stop distance) |
 | Time Frame | X-X days expected hold |
 
-Focus on actionable EOD trading insights with specific price levels and risk management."""
+Focus on actionable swing trading insights with specific price levels and risk management."""
 
             context = {
                 "role": "user", 
@@ -196,7 +197,7 @@ Focus on actionable EOD trading insights with specific price levels and risk man
             # Use original context with valid investment plan
             context = {
                 "role": "user",
-                "content": f"Based on comprehensive EOD trading analysis by specialist analysts, here is a EOD trading plan for {company_name}. This plan incorporates technical patterns, momentum indicators, support/resistance levels, and volume analysis optimized for overnight positions.\n\nProposed EOD Trading Plan: {investment_plan}\n\nMake your EOD trading decision focusing on clear entry points, profit targets, and stop losses with proper risk management for overnight positions.",
+                "content": f"Based on comprehensive swing trading analysis by specialist analysts, here is a swing trading plan for {company_name}. This plan incorporates multi-timeframe technical analysis (1h/4h/1d), key levels, and volume analysis optimized for multi-day swing positions.\n\nProposed Swing Trading Plan: {investment_plan}\n\nMake your swing trading decision focusing on clear entry points, swing targets, and ATR-based stop losses with proper risk management for a 2-10 day holding period.",
             }
 
         messages = [
@@ -234,16 +235,16 @@ USER MESSAGE:
         # Check if we have substantial analysis content
         if len(analysis_content.strip()) < 200 or ("FINAL TRANSACTION PROPOSAL:" in analysis_content and len(analysis_content.replace("FINAL TRANSACTION PROPOSAL:", "").strip()) < 150):
             # Generate fallback comprehensive analysis
-            fallback_prompt = f"""As an expert EOD trader, create a comprehensive trading plan for {company_name} focusing on overnight positions.
+            fallback_prompt = f"""As an expert swing trader, create a comprehensive trading plan for {company_name} focusing on multi-day positions (2-10 days).
 
-**EOD TRADING ANALYSIS:**
-1. **Technical Setup** - Analyze current price action and key levels
-2. **Entry Strategy** - Define specific entry points and signals
-3. **Risk Management** - Calculate stop losses and position size
-4. **Profit Targets** - Set realistic price objectives
-5. **Trading Timeline** - Establish expected holding period
+**SWING TRADING ANALYSIS:**
+1. **Multi-Timeframe Setup** - Analyze 1h/4h/1d trend alignment and key levels
+2. **Entry Strategy** - Define specific entry points at pullbacks or breakouts
+3. **Risk Management** - Calculate ATR-based stop losses and position size
+4. **Swing Targets** - Set realistic multi-day price objectives
+5. **Holding Period** - Establish expected 2-10 day time horizon
 
-Include detailed reasoning for EOD trading decisions and conclude with a clear recommendation.
+Include detailed reasoning for swing trading decisions and conclude with a clear recommendation.
 
 Focus on actionable insights with specific price levels and risk parameters."""
             
@@ -253,7 +254,7 @@ Focus on actionable insights with specific price levels and risk parameters."""
         # Ensure we have a final recommendation
         if "FINAL TRANSACTION PROPOSAL:" not in analysis_content:
             # Create final recommendation based on analysis
-            final_prompt = f"""Based on the following EOD trading analysis for {company_name}, provide your final trading decision.
+            final_prompt = f"""Based on the following swing trading analysis for {company_name}, provide your final trading decision.
 
 Analysis:
 {analysis_content}

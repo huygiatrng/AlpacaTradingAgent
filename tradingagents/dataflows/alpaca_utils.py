@@ -94,23 +94,32 @@ def _parse_timeframe(tf: Union[str, TimeFrame]) -> TimeFrame:
         return tf
 
     tf = tf.strip()
+    low = tf.lower()
     
     # mapping common strings
-    if tf.lower() == "1min":
+    if low == "1min":
         result = TimeFrame.Minute
-    elif tf.lower().endswith("min"):
+    elif low.endswith("min"):
         # e.g. "5Min", "15min"
         amount = int(tf[:-3])
         result = TimeFrame(amount, TimeFrameUnit.Minute)
-    elif tf.lower() == "1hour":
+    elif low == "1hour" or low == "1h":
         result = TimeFrame.Hour
-    elif tf.lower().endswith("hour"):
+    elif low.endswith("hour"):
         amount = int(tf[:-4])
         result = TimeFrame(amount, TimeFrameUnit.Hour)
-    elif tf.lower() == "1day":
+    elif low.endswith("h") and low[:-1].isdigit():
+        # shorthand: "4h", "2h", etc.
+        amount = int(low[:-1])
+        result = TimeFrame(amount, TimeFrameUnit.Hour)
+    elif low == "1day" or low == "1d":
         result = TimeFrame.Day
-    elif tf.lower().endswith("day"):
+    elif low.endswith("day"):
         amount = int(tf[:-3])
+        result = TimeFrame(amount, TimeFrameUnit.Day)
+    elif low.endswith("d") and low[:-1].isdigit():
+        # shorthand: "2d", "3d", etc.
+        amount = int(low[:-1])
         result = TimeFrame(amount, TimeFrameUnit.Day)
     else:
         # fallback

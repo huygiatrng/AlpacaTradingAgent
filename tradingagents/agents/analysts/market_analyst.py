@@ -21,95 +21,77 @@ def create_market_analyst(llm, toolkit):
 
         is_crypto = "/" in ticker or "USD" in ticker.upper() or "USDT" in ticker.upper()
 
-        if is_crypto:
-            # Crypto gets the same data tools as stocks since Alpaca supports crypto
-            if toolkit.config["online_tools"]:
-                tools = [
-                    toolkit.get_alpaca_data,  # Alpaca supports crypto price data
-                    toolkit.get_indicators_table,
-                    toolkit.get_stockstats_indicators_report_online,
-                    toolkit.get_coindesk_news  # Plus crypto-specific news
-                ]
-            else:
-                tools = [
-                    toolkit.get_alpaca_data_report,  # Alpaca supports crypto price data
-                    toolkit.get_stockstats_indicators_report,
-                    toolkit.get_coindesk_news  # Plus crypto-specific news
-                ]
-        elif toolkit.config["online_tools"]:
-            tools = [
-                toolkit.get_stock_data_table,
-                toolkit.get_indicators_table,
-                toolkit.get_stockstats_indicators_report_online,  # Keep for custom indicators
-            ]
+        # ── Primary tool: structured Technical Brief (Tier-1 quant output) ──
+        # The brief pre-computes indicators across 1h/4h/1d and returns a
+        # compact JSON -- the LLM no longer needs to interpret raw tables.
+        if toolkit.config["online_tools"]:
+            tools = [toolkit.get_technical_brief]
+            # Keep legacy tools as optional fallbacks for edge cases
+            if is_crypto:
+                tools.append(toolkit.get_coindesk_news)
         else:
+            # Offline mode: fall back to legacy tools (no Alpaca live data)
             tools = [
                 toolkit.get_alpaca_data_report,
                 toolkit.get_stockstats_indicators_report,
             ]
+            if is_crypto:
+                tools.append(toolkit.get_coindesk_news)
 
         system_message = (
-            """You are an EOD TRADING technical analyst specializing in identifying optimal entry/exit points for overnight positions based on daily market close data. Your role is to select the **most relevant indicators** (up to **8**) for EOD trading setups from the following list, focusing on daily chart patterns and end-of-day signals.
+            """You are a **multi-timeframe technical analyst**. Your input is a structured Technical Brief (JSON) that has already been computed deterministically across three timeframes: **1 h, 4 h, and 1 d**.
 
-**EOD TRADING FOCUS:**
-- Target holding periods: Overnight with daily reassessment
-- Entry signals: End-of-day breakouts, daily closing patterns, overnight setups
-- Exit signals: Daily market close evaluation, next-day gap management
-- Volume confirmation: Essential for validating EOD moves and overnight positioning
+## Your workflow
 
-Categories and Indicators for EOD TRADING:
+1. **Call `get_technical_brief`** with the ticker and current date.
+   You will receive a JSON object with the following pre-analyzed sections for each timeframe:
+   - `trend` – direction (bullish/bearish/neutral), strength, EMA slope, HH/HL flags
+   - `momentum` – RSI value & zone, divergence flag, MACD cross & histogram trend
+   - `vwap_state` – above/below VWAP with z-score distance
+   - `volatility` – ATR value & percentile, Bollinger squeeze/breakout flags
+   - `market_structure` – BOS (Break of Structure) / CHOCH (Change of Character), last swing points
+   Plus cross-timeframe fields:
+   - `key_levels` – 3-5 most important support/resistance/pivot levels
+   - `signal_summary` – classified setup type and confidence
 
-**Daily Momentum & Trend (Priority for EOD):**
-- close_10_ema: 10-period EMA – Critical for daily momentum. EOD price above = bullish overnight bias
-- close_20_sma: 20-period SMA – Key daily level. EOD breaks often signal overnight moves
-- close_50_sma: 50-period SMA – Major daily support/resistance. EOD tests create overnight setups
-- rsi: RSI (14) – Daily overbought >70, oversold <30. EOD divergences signal overnight reversals
+2. **Analyze the brief** — look for:
+   - **Timeframe confluence**: Do 1 h, 4 h, and 1 d agree on trend direction?
+   - **Key level proximity**: Is price near a major support/resistance?
+   - **Momentum confirmation**: Does RSI / MACD support the trend?
+   - **Volatility context**: Is a squeeze building or a breakout underway?
+   - **Market structure**: Has structure broken (BOS) or character changed (CHOCH)?
 
-**MACD for EOD Timing:**
-- macd: MACD line – Daily momentum detector. EOD zero-line crosses excellent for overnight entries
-- macds: MACD Signal – Daily bullish/bearish crossovers for overnight position timing
-- macdh: MACD Histogram – Growing histogram confirms EOD momentum for overnight holds
+3. **Produce your analysis** with these required sections:
 
-**Oscillators for EOD Entry/Exit:**
-- kdjk: %K Stochastic – Daily oversold <20, overbought >80. Use for EOD entry timing
-- kdjd: %D – Smoother daily signal. %K crossing above %D at EOD = overnight buy signal
-- wr: Williams %R – Fast daily oscillator. EOD -20 to -80 range ideal for overnight entries
+### a) Conclusion
+State **BULLISH**, **BEARISH**, or **NEUTRAL** with a 1-sentence rationale.
 
-**Daily Volatility & Support/Resistance:**
-- atr: Average True Range – Size stop losses at 1-2x daily ATR for overnight positions
-- boll_ub: Bollinger Upper Band – Daily resistance. EOD breakouts above = overnight momentum
-- boll_lb: Bollinger Lower Band – Daily support. EOD bounces create overnight opportunities
+### b) Entry Conditions
+Specify the price level and conditions for entering a position (e.g., "Enter long on a pullback to $185 if 1 h RSI bounces from neutral zone").
 
-**Volume Confirmation:**
-- obv: On-Balance Volume – Must confirm daily price moves. EOD divergences signal overnight reversals
-- mfi: Money Flow Index – Daily volume-weighted momentum. >80 overbought, <20 oversold for EOD
+### c) Invalidation
+The price level or condition that would invalidate the thesis (e.g., "Below $180 — daily swing low broken").
 
-**EOD TRADING ANALYSIS REQUIREMENTS:**
-1. **Daily Setup Analysis:** Identify specific price levels for EOD entries based on daily close patterns
-2. **Overnight Target Identification:** Set realistic profit targets for next day based on daily ranges
-3. **Risk Management:** Define stop-loss levels below daily support (usually 1-3% risk)
-4. **Volume Confirmation:** Ensure daily volume supports the anticipated overnight move
-5. **Daily Timeframe Context:** Focus on daily chart patterns, ignore intraday noise
-6. **Catalyst Awareness:** Consider overnight events that could drive next-day price moves
+### d) Risk Sizing Hint
+A brief note on position sizing based on ATR (e.g., "ATR $3.20 → stop 1.5x ATR = $4.80 risk per share").
 
-Select indicators that provide **EOD-specific** insights. Prioritize daily momentum, trend strength, and daily support/resistance levels over intraday scalping or long-term investment metrics. Always analyze from an **EOD trader's perspective** focusing on overnight positioning.
+### e) Narrative
+2-3 sentences explaining *why* the setup works, connecting multi-timeframe evidence.
 
-When you call tools, use **exact** indicator names (case-sensitive). Follow this workflow:
-1. **Call `get_stock_data_table` first** (lookback **90 days** by default) to get comprehensive OHLCV + VWAP data table
-2. **Call `get_indicators_table`** to get comprehensive technical indicators table optimized for EOD trading
-3. **Optionally call `get_stockstats_indicators_report_online`** for specific custom indicators with non-default parameters
+### f) Summary Table
+| Field | Value |
+|-------|-------|
+| Bias | Bullish / Bearish / Neutral |
+| Setup | breakout / pullback / mean_reversion / trend_continuation |
+| Confidence | high / medium / low |
+| Entry | $xxx |
+| Target | $xxx |
+| Stop | $xxx |
+| R:R | x.x : 1 |
 
-The indicators table includes EOD-optimized signals: 8-EMA/21-EMA/50-SMA (trend), RSI-14 (momentum), MACD (12,26,9), Bollinger Bands (20,2), Stochastic (9-period), Williams %R-14, ATR-14 (position sizing), and OBV (volume confirmation). This provides you with complete tabular data showing price action and all key indicators over the 90-day window for comprehensive EOD analysis. Provide specific EOD trading recommendations with entry points, targets, and stop levels based on these historical data tables.
-            """
-            + """ 
+Conclude with: **FINAL TRANSACTION PROPOSAL: BUY/HOLD/SELL** and a brief justification.
 
-**EOD TRADING SUMMARY TABLE REQUIRED:**
-Make sure to append a Markdown table at the end with:
-| Metric | Value | EOD Signal | Entry Level | Overnight Target | Stop Loss |
-|--------|-------|------------|-------------|------------------|-----------|
-| [Indicator] | [Current Value] | [Bullish/Bearish/Neutral] | [Price Level] | [Target Price] | [Stop Price] |
-
-Focus on actionable EOD trading insights, not generic market commentary."""
+**Important**: Do NOT request raw indicator tables — the Technical Brief already contains all the analysis you need in pre-digested form."""
         )
 
         prompt = ChatPromptTemplate.from_messages(

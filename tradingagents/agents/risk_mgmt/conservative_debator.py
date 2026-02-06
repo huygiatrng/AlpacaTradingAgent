@@ -45,31 +45,31 @@ def create_safe_debator(llm, config=None):
         risk_specific_context = f"""
 {agent_context}
 
-**CONSERVATIVE EOD TRADING APPROACH:**
-As the Conservative Risk Analyst for EOD trading, you prioritize capital preservation while capturing modest overnight gains:
+**CONSERVATIVE SWING TRADING APPROACH:**
+As the Conservative Risk Analyst for swing trading, you prioritize capital preservation while capturing controlled multi-day moves:
 
-**CONSERVATIVE EOD PRINCIPLES:**
-- **Position Sizing:** Never risk more than 1.5% per EOD trade (vs. aggressive 3%)
-- **Entry Timing:** Wait for clear daily technical confirmation before entering overnight positions
-- **Stop Losses:** Tight stops at 2-3% maximum loss, preferably at daily technical levels
-- **Target Profits:** Take profits early at first daily resistance rather than holding for maximum gains
-- **Market Selection:** Favor liquid, established stocks over volatile small-caps for overnight holds
+**CONSERVATIVE SWING PRINCIPLES:**
+- **Position Sizing:** Never risk more than 1.5% per swing trade (vs. aggressive 3%)
+- **Entry Timing:** Wait for clear multi-timeframe confirmation (1h/4h/1d alignment) before entering
+- **Stop Losses:** Tight stops at 1.5x ATR below entry, placed at key swing levels
+- **Target Profits:** Take partial profits (50%) at first swing target; trail the remainder
+- **Market Selection:** Favor liquid, established stocks over volatile small-caps for swing holds
 - **Risk/Reward:** Minimum 2.5:1 R/R ratio required, preferably 3:1
 
 **CONSERVATIVE RISK ASSESSMENT:**
-1. **Overnight Risk:** Minimize exposure to earnings/news during overnight holding periods
-2. **Gap Risk:** Avoid overnight positions in stocks prone to large opening gaps
-3. **Liquidity Risk:** Only EOD trade stocks with >1M average daily volume
-4. **Market Environment:** Reduce overnight exposure during high VIX periods (>25)
-5. **Position Limits:** Maximum 10% of portfolio in overnight positions total
-6. **Time Limits:** Exit EOD trades at market close if targets not met by end of next day
+1. **Event Risk:** Minimize exposure to earnings/major news during the 2-10 day holding period
+2. **Gap Risk:** Avoid swing positions in stocks prone to large gaps without clear catalysts
+3. **Liquidity Risk:** Only swing trade stocks with >1M average daily volume
+4. **Market Environment:** Reduce swing exposure during high VIX periods (>25)
+5. **Position Limits:** Maximum 15% of portfolio in swing positions total
+6. **Time Limits:** Exit swing trades if thesis is invalidated or max holding period (10 days) is reached
 
-**CONSERVATIVE EOD SIGNALS:**
-- Require confluence of multiple daily technical indicators before overnight entry
-- Prefer buying near daily support rather than chasing EOD breakouts
-- Exit immediately if daily stop loss is hit, no second chances
-- Take 50% profits at first daily resistance level to lock in gains
-- Avoid EOD trading during earnings season or major Fed events
+**CONSERVATIVE SWING SIGNALS:**
+- Require multi-timeframe confluence (1h/4h/1d) before entry
+- Prefer buying at pullbacks to support rather than chasing breakouts
+- Exit immediately if stop loss is hit, no second chances
+- Take 50% profits at first swing target to lock in gains
+- Avoid initiating new swings during major earnings weeks or FOMC events
 
 Focus on preserving capital first, generating returns second. Challenge aggressive proposals that exceed conservative risk limits."""
 

@@ -55,6 +55,25 @@ def get_search_context_for_depth(research_depth=None):
     return depth_mapping.get(research_depth.lower() if research_depth else "medium", "medium")
 
 
+def get_llm_params_for_depth(research_depth=None):
+    """Get reasoning effort and verbosity matching the research depth.
+
+    Returns:
+        dict with keys ``effort`` and ``verbosity`` (both str).
+    """
+    if research_depth is None:
+        config = get_config()
+        research_depth = config.get("research_depth", "Medium")
+
+    depth = research_depth.lower() if research_depth else "medium"
+    mapping = {
+        "shallow": {"effort": "low",    "verbosity": "low"},
+        "medium":  {"effort": "medium",  "verbosity": "medium"},
+        "deep":    {"effort": "high",    "verbosity": "high"},
+    }
+    return mapping.get(depth, mapping["medium"])
+
+
 def get_model_params(model_name, max_tokens_value=3000):
     """Get appropriate parameters for different model types."""
     params = {}
@@ -1090,8 +1109,9 @@ def get_fundamentals_openai(ticker, curr_date):
         config = get_config()
         model = config.get("quick_think_llm", "gpt-4o-mini")  # fallback to default
         
-        # Get search context size based on research depth
+        # Get search context size and LLM params based on research depth
         search_context = get_search_context_for_depth()
+        depth_params = get_llm_params_for_depth()
         
         from datetime import datetime, timedelta
         start_date = (datetime.strptime(curr_date, "%Y-%m-%d") - timedelta(days=30)).strftime("%Y-%m-%d")
@@ -1109,16 +1129,26 @@ def get_fundamentals_openai(ticker, curr_date):
         
         if is_gpt5 or is_gpt52 or is_gpt41:
             # Use responses.create() API with web search capabilities
-            user_message = f"Search the web and provide a current fundamental analysis for {ticker} covering the period from {start_date} to {curr_date}. Include:\n" + \
-                          f"1. Key financial metrics (P/E, P/S, P/B, EV/EBITDA, etc.)\n" + \
-                          f"2. Revenue and earnings trends\n" + \
-                          f"3. Cash flow analysis\n" + \
-                          f"4. Balance sheet strength\n" + \
-                          f"5. Competitive positioning\n" + \
-                          f"6. Recent business developments\n" + \
-                          f"7. Valuation assessment\n" + \
-                          f"8. Summary table with key fundamental metrics and ratios\n\n" + \
-                          f"Format the analysis professionally with clear sections and include a summary table at the end."
+            # Concise, swing-trading-focused prompt that avoids verbose multi-section output
+            user_message = (
+                f"Provide a concise fundamental analysis for {ticker} "
+                f"covering {start_date} to {curr_date}. "
+                f"Be brief and focus on what matters for a 2-10 day swing trade.\n\n"
+                f"Cover these in SHORT paragraphs (not long essays):\n"
+                f"1. Key valuation snapshot (P/E, EV/EBITDA, P/S — just the numbers)\n"
+                f"2. Latest earnings/revenue vs estimates (beat or miss, magnitude)\n"
+                f"3. Cash flow & balance sheet health (1-2 sentences)\n"
+                f"4. Recent catalysts (earnings, leadership changes, M&A, etc.)\n"
+                f"5. Key risk for the next 2-10 days\n\n"
+                f"End with a compact summary table of key metrics.\n"
+                f"Keep total response under 800 words."
+            )
+            
+            system_text = (
+                "You are a fundamental analyst providing concise, swing-trading-focused analysis. "
+                "Use web search to find the latest financials but keep your output SHORT and actionable. "
+                "Do not write long essays — be direct and data-driven."
+            )
             
             # Base parameters for responses.create()
             if is_gpt52:
@@ -1131,7 +1161,7 @@ def get_fundamentals_openai(ticker, curr_date):
                             "content": [
                                 {
                                     "type": "input_text",
-                                    "text": "You are a fundamental analyst with web search access specializing in financial analysis and valuation. Use real-time web search to provide comprehensive fundamental analysis based on available financial metrics and recent company developments."
+                                    "text": system_text
                                 }
                             ]
                         },
@@ -1153,13 +1183,13 @@ def get_fundamentals_openai(ticker, curr_date):
                     }],
                     "include": ["web_search_call.action.sources"]
                 }
-                # Apply GPT-5.2 specific parameters
+                # Apply depth-aware parameters
                 api_params["summary"] = "auto"
                 if "gpt-5.2-pro" in model:
                     api_params["store"] = True
                 else:
-                    api_params["reasoning"] = {"effort": "medium"}
-                    api_params["verbosity"] = "medium"
+                    api_params["reasoning"] = {"effort": depth_params["effort"]}
+                    api_params["verbosity"] = depth_params["verbosity"]
             elif is_gpt5:
                 # GPT-5 uses "developer" role
                 api_params = {
@@ -1170,7 +1200,7 @@ def get_fundamentals_openai(ticker, curr_date):
                             "content": [
                                 {
                                     "type": "input_text",
-                                    "text": "You are a fundamental analyst with web search access specializing in financial analysis and valuation. Use real-time web search to provide comprehensive fundamental analysis based on available financial metrics and recent company developments."
+                                    "text": system_text
                                 }
                             ]
                         },
@@ -1184,8 +1214,8 @@ def get_fundamentals_openai(ticker, curr_date):
                             ]
                         }
                     ],
-                    "text": {"format": {"type": "text"}, "verbosity": "medium"},
-                    "reasoning": {"effort": "medium", "summary": "auto"},
+                    "text": {"format": {"type": "text"}, "verbosity": depth_params["verbosity"]},
+                    "reasoning": {"effort": depth_params["effort"], "summary": "auto"},
                     "tools": [{
                         "type": "web_search",
                         "user_location": {"type": "approximate"},
@@ -1204,7 +1234,7 @@ def get_fundamentals_openai(ticker, curr_date):
                             "content": [
                                 {
                                     "type": "input_text",
-                                    "text": "You are a fundamental analyst with web search access specializing in financial analysis and valuation. Use real-time web search to provide comprehensive fundamental analysis based on available financial metrics and recent company developments."
+                                    "text": system_text
                                 }
                             ]
                         },
@@ -1442,7 +1472,7 @@ def get_alpaca_data(
         
         # Add key metrics summary
         if len(df_formatted) > 1:
-            result += f"\n\n## Key EOD Trading Metrics:\n"
+            result += f"\n\n## Key Swing Trading Metrics:\n"
             result += f"Current Close: ${current_close:.2f}\n"
             result += f"Daily Change: ${daily_change:.2f} ({daily_change_pct:+.2f}%)\n"
             result += f"Volume vs Avg: {volume_ratio:.2f}x ({int(current_volume):,} vs {int(avg_volume):,})\n"
@@ -1476,6 +1506,38 @@ def get_alpaca_data(
         return result
     except Exception as e:
         return f"Error getting stock data for {symbol}: {str(e)}"
+
+
+def get_technical_brief(
+    symbol: Annotated[str, "ticker symbol (stocks: AAPL; crypto: BTC/USD)"],
+    curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
+) -> str:
+    """
+    Build a standardized Technical Brief for LLM consumption.
+
+    Computes indicators across 1h / 4h / 1d timeframes deterministically,
+    then returns a compact JSON with trend, momentum, VWAP state, volatility,
+    market structure, key levels, and an aggregate signal summary.
+
+    Args:
+        symbol: Ticker symbol (e.g. AAPL, BTC/USD)
+        curr_date: The current trading date in YYYY-mm-dd format
+
+    Returns:
+        str: JSON string of the TechnicalBrief
+    """
+    from .technical_brief import build_technical_brief
+
+    try:
+        brief = build_technical_brief(symbol, curr_date)
+        return brief.model_dump_json(indent=2)
+    except Exception as e:
+        import json as _json
+        return _json.dumps({
+            "error": f"Failed to build technical brief for {symbol}: {str(e)}",
+            "symbol": symbol,
+            "generated_at": curr_date,
+        })
 
 
 def get_earnings_calendar(

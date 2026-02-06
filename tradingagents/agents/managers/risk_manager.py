@@ -108,28 +108,28 @@ def create_risk_manager(llm, memory, config=None):
         manager_context = f"""
 {agent_context}
 
-**EOD TRADING RISK MANAGEMENT:**
-As the EOD Trading Risk Manager, you specialize in managing risks for overnight position holds. Your focus areas:
+**SWING TRADING RISK MANAGEMENT:**
+As the Swing Trading Risk Manager, you specialize in managing risks for multi-day position holds (2-10 days). Your focus areas:
 
-**EOD TRADING RISK FACTORS:**
-1. **Overnight Gap Risk:** Positions exposed to gap risk from overnight news/events
-2. **Position Sizing:** Never risk more than 1-3% of capital per EOD trade
-3. **Stop Loss Management:** Use daily technical levels, not arbitrary percentages
-4. **Correlation Risk:** Avoid multiple correlated overnight positions simultaneously
+**SWING TRADING RISK FACTORS:**
+1. **Multi-Day Event Risk:** Positions exposed to earnings, FOMC, or major news during the holding period
+2. **Position Sizing:** Never risk more than 1-3% of capital per swing trade
+3. **Stop Loss Management:** Use ATR-based stops (1.5-2x ATR) at key swing levels
+4. **Correlation Risk:** Avoid multiple correlated swing positions simultaneously
 5. **Market Environment:** Adjust exposure based on overall market volatility (VIX)
-6. **Time Decay:** Consider theta decay for any options positions held overnight
+6. **Trend Invalidation:** Monitor for change of character (CHOCH) or trend reversal signals
 
 **RISK ASSESSMENT FRAMEWORK:**
-- **Entry Risk:** Distance to stop loss vs. account size (max 3% risk)
-- **Holding Risk:** News/earnings events during overnight holding period
-- **Exit Risk:** Gap risk, liquidity concerns, pre-market volatility
-- **Portfolio Risk:** Total overnight exposure across all positions (<15% of capital)
+- **Entry Risk:** Distance to ATR-based stop vs. account size (max 3% risk)
+- **Holding Risk:** News/earnings events during the 2-10 day swing period
+- **Exit Risk:** Liquidity concerns, gap risk on adverse catalysts
+- **Portfolio Risk:** Total swing exposure across all positions (<20% of capital)
 
 **POSITION SIZING CALCULATION:**
 Position Size = (Risk Amount / Stop Distance) × Share Price
 - Risk Amount: 1-3% of total capital
-- Stop Distance: Entry price - daily stop loss price
-- Maximum position: Never exceed 8% of portfolio in single overnight hold
+- Stop Distance: Entry price - ATR-based stop loss price
+- Maximum position: Never exceed 10% of portfolio in a single swing trade
 
 Current Alpaca Position Status:
 {open_pos_desc}
@@ -141,16 +141,16 @@ Alpaca Account Status:
 
 **RISK DECISION MATRIX:**
 Consider the arguments from all three risk perspectives:
-- **Aggressive:** High-reward EOD setups, wider stops, larger positions
-- **Conservative:** Tight stops, smaller positions, avoid volatile overnight setups  
+- **Aggressive:** High-reward swing setups, wider stops, larger positions
+- **Conservative:** Tight stops, smaller positions, avoid volatile swing setups  
 - **Neutral:** Balanced approach, standard position sizing, moderate targets
 
 Your final {decision_format} decision should address:
-1. **Position Size:** Exact dollar amount or share quantity based on daily stop distance
-2. **Risk/Reward Ratio:** Minimum 2:1, preferably 3:1 for EOD trades
-3. **Time Horizon:** Confirm overnight hold with daily reassessment
-4. **Risk Controls:** Daily stop loss, position limits, correlation checks
-5. **Market Conditions:** Factor in VIX, daily trend strength, volume patterns
+1. **Position Size:** Exact dollar amount or share quantity based on ATR stop distance
+2. **Risk/Reward Ratio:** Minimum 2:1, preferably 3:1 for swing trades
+3. **Time Horizon:** Confirm 2-10 day swing hold with daily monitoring
+4. **Risk Controls:** ATR-based stops, position limits, correlation checks
+5. **Market Conditions:** Factor in VIX, multi-timeframe trend strength, volume patterns
 
 Use the format: {final_format}
 

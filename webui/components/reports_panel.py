@@ -30,7 +30,7 @@ def create_reports_panel():
                     id="market-analysis-tab-content",
                     children=[
                         dcc.Markdown(
-                            "📊 **Loading Market Analysis...** \n\nTechnical indicators and EOD trading signals will appear here.",
+                            "📊 **Loading Market Analysis...** \n\nTechnical indicators and swing trading signals will appear here.",
                             mathjax=True,
                             highlight_config={"theme": "dark"},
                             dangerously_allow_html=False,
@@ -152,7 +152,7 @@ def create_reports_panel():
                     id="trader-plan-tab-content",
                     children=[
                         dcc.Markdown(
-                            "🧠 **Loading Trader Plan...** \n\nEOD trading strategy and execution plan will appear here.",
+                            "🧠 **Loading Trader Plan...** \n\nSwing trading strategy and execution plan will appear here.",
                             mathjax=True,
                             highlight_config={"theme": "dark"},
                             dangerously_allow_html=False,

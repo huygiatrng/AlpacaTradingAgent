@@ -48,37 +48,36 @@ def get_trading_mode_context(config: Optional[Dict[str, Any]] = None,
 
 
 def _get_investment_context() -> Dict[str, str]:
-    """Get context for investment mode (BUY/HOLD/SELL) optimized for EOD trading"""
+    """Get context for investment mode (BUY/HOLD/SELL) optimized for swing trading"""
     return {
         "mode": "investment",
-        "mode_name": "EOD TRADING INVESTMENT MODE",
+        "mode_name": "SWING TRADING INVESTMENT MODE",
         "actions": "BUY, HOLD, or SELL",
         "action_list": TradingModeConfig.INVESTMENT_ACTIONS,
         "allow_shorts": False,
         "instructions": """
-You are operating in EOD TRADING INVESTMENT MODE with daily decision-making at market close.
+You are operating in SWING TRADING INVESTMENT MODE with multi-day holding horizons.
 
-Available actions for EOD trading:
-- BUY: Enter position based on EOD analysis for next trading day
-- HOLD: Maintain current position overnight after daily reassessment
-- SELL: Exit position at market close or prepare for next day exit
+Available actions for swing trading:
+- BUY: Enter a swing position targeting a 2-10 day hold based on multi-timeframe analysis
+- HOLD: Maintain current swing position; daily monitoring but multi-day horizon
+- SELL: Exit swing position when target is hit, stop is triggered, or thesis is invalidated
 
-**EOD TRADING FOCUS:**
-- **Decision Timing:** Make trading decisions at end of each trading day
-- **Holding Period:** Overnight positions with daily review and reassessment
-- **Entry Strategy:** Based on daily closing prices, EOD momentum, and overnight setups
-- **Exit Strategy:** Daily evaluation of profit targets, stop losses, and risk levels
-- **Risk Management:** 1-3% risk per trade, 2:1 minimum risk/reward ratio
-- **Position Sizing:** Based on daily volatility and overnight gap risk
+**SWING TRADING FOCUS:**
+- **Holding Period:** 2-10 trading days, capturing intermediate price swings
+- **Entry Strategy:** Based on multi-timeframe confluence (1h/4h/1d), pullbacks to support, or breakouts
+- **Exit Strategy:** Predefined swing targets at key resistance/support or trailing stops
+- **Risk Management:** 1-3% risk per trade, minimum 2:1 risk/reward ratio
+- **Position Sizing:** Based on ATR-derived stop distance and account risk tolerance
 
-**EOD TRADING CRITERIA:**
-- Analysis based on daily closing prices and end-of-day momentum
-- Volume confirmation from daily trading session
-- Defined stop loss and profit target before overnight hold
-- Consideration of overnight news risk and pre-market catalysts
-- Daily market environment assessment and position adjustment
+**SWING TRADING CRITERIA:**
+- Multi-timeframe trend alignment (1h, 4h, 1d)
+- Entry at key technical levels (support, VWAP, moving averages)
+- Volume confirmation on breakouts and trend continuation
+- Defined stop loss and multi-day profit target before entry
+- Macro and news awareness for catalysts during the holding period
 
-Focus on daily trading decisions with overnight position management, not intraday or long-term investing.
+Focus on capturing multi-day price swings, not intraday scalps or long-term investing.
 """,
         "decision_format": "BUY/HOLD/SELL",
         "final_format": "FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**"
@@ -86,61 +85,61 @@ Focus on daily trading decisions with overnight position management, not intrada
 
 
 def _get_trading_context(current_position: str = "NEUTRAL") -> Dict[str, str]:
-    """Get context for trading mode (LONG/NEUTRAL/SHORT) optimized for EOD trading"""
+    """Get context for trading mode (LONG/NEUTRAL/SHORT) optimized for swing trading"""
     
     position_logic = f"""
 Current Position: {current_position}
 
-EOD Trading Position Transition Logic:
+Swing Trading Position Transition Logic:
 - If Current Position: LONG
-  • Signal: LONG → Hold position overnight, daily reassessment at market close
-  • Signal: NEUTRAL → Close LONG position at market close or prepare exit for next day
-  • Signal: SHORT → Close LONG position and prepare SHORT entry for next trading day
+  • Signal: LONG → Hold swing position, monitor daily with multi-day horizon
+  • Signal: NEUTRAL → Close LONG position at next favorable exit point
+  • Signal: SHORT → Close LONG position and enter SHORT swing position
 
 - If Current Position: SHORT  
-  • Signal: SHORT → Hold position overnight, daily reassessment at market close
-  • Signal: NEUTRAL → Close SHORT position at market close or prepare exit for next day
-  • Signal: LONG → Close SHORT position and prepare LONG entry for next trading day
+  • Signal: SHORT → Hold swing position, monitor daily with multi-day horizon
+  • Signal: NEUTRAL → Close SHORT position at next favorable exit point
+  • Signal: LONG → Close SHORT position and enter LONG swing position
 
 - If Current Position: NEUTRAL (no open position)
-  • Signal: LONG → Prepare LONG position entry based on EOD analysis
-  • Signal: SHORT → Prepare SHORT position entry based on EOD analysis
-  • Signal: NEUTRAL → Stay in cash, wait for clear EOD setup
+  • Signal: LONG → Enter LONG swing position based on multi-timeframe setup
+  • Signal: SHORT → Enter SHORT swing position based on multi-timeframe setup
+  • Signal: NEUTRAL → Stay in cash, wait for clear swing setup with confluence
 """
     
     return {
         "mode": "trading",
-        "mode_name": "EOD TRADING MODE", 
+        "mode_name": "SWING TRADING MODE", 
         "actions": "LONG, NEUTRAL, or SHORT",
         "action_list": TradingModeConfig.TRADING_ACTIONS,
         "allow_shorts": True,
         "current_position": current_position,
         "position_logic": position_logic,
         "instructions": f"""
-You are operating in EOD TRADING MODE with daily decision-making at market close.
+You are operating in SWING TRADING MODE with multi-day holding horizons (2-10 days).
 
 {position_logic}
 
-Available EOD trading actions:
-- LONG: Take long position based on EOD analysis (profit from overnight and next-day moves)
-- SHORT: Take short position based on EOD analysis (profit from overnight and next-day declines) 
-- NEUTRAL: Close all positions or stay in cash based on daily assessment
+Available swing trading actions:
+- LONG: Take long swing position targeting multi-day upside move
+- SHORT: Take short swing position targeting multi-day downside move
+- NEUTRAL: Close all positions or stay in cash until a clear swing setup appears
 
-**EOD TRADING METHODOLOGY:**
-- **Decision Timing:** All trading decisions made at market close (3:50-4:00 PM ET)
-- **Entry Signals:** Based on daily closing prices, EOD momentum, and overnight catalysts
-- **Exit Signals:** Daily reassessment at market close, gap management at open
-- **Risk Management:** 1-3% risk per trade, 2:1 minimum R/R ratio
-- **Position Management:** Daily stop adjustments, overnight risk assessment
+**SWING TRADING METHODOLOGY:**
+- **Holding Period:** 2-10 trading days, capturing intermediate price swings
+- **Entry Signals:** Multi-timeframe confluence (1h/4h/1d), pullbacks, breakouts, trend continuation
+- **Exit Signals:** Swing targets at key levels, trailing stops, or thesis invalidation
+- **Risk Management:** 1-3% risk per trade, minimum 2:1 R/R ratio
+- **Position Management:** Daily monitoring, ATR-based trailing stops, adjust only on significant changes
 
-**EOD POSITION CRITERIA:**
-- Analysis based on daily charts and end-of-day technical setup
-- Volume confirmation from full trading session
-- Risk/reward ratio of at least 2:1 based on daily ranges
-- Consideration of overnight news events and pre-market catalysts
-- Appropriate position sizing based on daily volatility (ATR)
+**SWING POSITION CRITERIA:**
+- Multi-timeframe trend alignment (1h, 4h, 1d)
+- Entry at key technical levels with volume confirmation
+- Risk/reward ratio of at least 2:1 based on swing targets
+- Awareness of macro events and earnings during the holding period
+- Position sizing based on ATR-derived stop distance
 
-Focus on daily decision-making with overnight position management, emphasizing end-of-day analysis and next-day preparation.
+Focus on capturing multi-day price swings with disciplined entries and predefined exits.
 """,
         "decision_format": "LONG/NEUTRAL/SHORT",
         "final_format": "FINAL TRANSACTION PROPOSAL: **LONG/NEUTRAL/SHORT**"
