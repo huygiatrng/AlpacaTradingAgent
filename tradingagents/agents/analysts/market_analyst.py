@@ -2,6 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import AIMessage, ToolMessage
 import time
 import json
+import re
 
 # Import prompt capture utility
 try:
@@ -10,6 +11,45 @@ except ImportError:
     # Fallback for when webui is not available
     def capture_agent_prompt(report_type, prompt_content, symbol=None):
         pass
+
+
+def _normalize_market_report_markdown(content: str) -> str:
+    """Normalize common inline section/table patterns into readable markdown."""
+    if not content:
+        return content
+
+    normalized = content.replace("\r\n", "\n").replace("\r", "\n")
+
+    section_map = {
+        "conclusion": "Conclusion",
+        "entry conditions": "Entry Conditions",
+        "invalidation": "Invalidation",
+        "risk sizing hint": "Risk Sizing Hint",
+        "narrative": "Narrative",
+        "summary table": "Summary Table",
+    }
+
+    for raw_label, display_label in section_map.items():
+        # Handles patterns like "a) Conclusion", "b) Entry Conditions", ...
+        pattern = rf"(?i)(?:^|\s)[a-f]\)\s*{re.escape(raw_label)}\b"
+        normalized = re.sub(pattern, f"\n\n## {display_label}\n", normalized)
+
+        # Handles inline labels without letter prefix.
+        inline_pattern = rf"(?i)(?:^|\s){re.escape(raw_label)}\s*:"
+        normalized = re.sub(inline_pattern, f"\n\n## {display_label}\n", normalized)
+
+    # Place final proposal on its own block.
+    normalized = re.sub(r"(?i)\bConclude with:\s*", "\n\n", normalized)
+    normalized = re.sub(
+        r"(?i)\bFINAL TRANSACTION PROPOSAL\s*:",
+        "\n\nFINAL TRANSACTION PROPOSAL:",
+        normalized,
+    )
+
+    # Split concatenated markdown table rows when they are on one line.
+    normalized = re.sub(r"\s+\|\s+\|\s+", " |\n| ", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized).strip()
+    return normalized
 
 
 def create_market_analyst(llm, toolkit):
@@ -65,22 +105,22 @@ def create_market_analyst(llm, toolkit):
 
 3. **Produce your analysis** with these sections:
 
-### a) Conclusion
+## Conclusion
 State **BULLISH**, **BEARISH**, or **NEUTRAL** with a 1-sentence rationale.
 
-### b) Entry Conditions
+## Entry Conditions
 Specify the price level and conditions for entering a position (e.g., "Enter long on a pullback to $185 if 1 h RSI bounces from neutral zone").
 
-### c) Invalidation
+## Invalidation
 The price level or condition that would invalidate the thesis (e.g., "Below $180 — daily swing low broken").
 
-### d) Risk Sizing Hint
+## Risk Sizing Hint
 A brief note on position sizing based on ATR (e.g., "ATR $3.20 → stop 1.5x ATR = $4.80 risk per share").
 
-### e) Narrative
+## Narrative
 2-3 sentences explaining *why* the setup works, connecting multi-timeframe evidence.
 
-### f) Summary Table
+## Summary Table
 | Field | Value |
 |-------|-------|
 | Bias | Bullish / Bearish / Neutral |
@@ -92,6 +132,11 @@ A brief note on position sizing based on ATR (e.g., "ATR $3.20 → stop 1.5x ATR
 | R:R | x.x : 1 |
 
 Conclude with: **FINAL TRANSACTION PROPOSAL: BUY/HOLD/SELL** and a brief justification.
+
+**Formatting Rules (strict)**:
+- Use markdown headings exactly as listed above.
+- Keep each section on separate lines. Do not output inline "a) ... b) ... c) ..." formatting.
+- Keep table rows on separate lines (valid markdown table syntax).
 
 **Important**: Do NOT request raw indicator tables — the Technical Brief already contains all the analysis you need in pre-digested form."""
         )
@@ -217,7 +262,9 @@ You must conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** followed b
             
             # Combine the analysis with the final proposal
             combined_content = result.content + "\n\n" + final_result.content
-            result = AIMessage(content=combined_content)
+            result = AIMessage(content=_normalize_market_report_markdown(combined_content))
+        else:
+            result = AIMessage(content=_normalize_market_report_markdown(result.content))
 
         return {
             "messages": [result],

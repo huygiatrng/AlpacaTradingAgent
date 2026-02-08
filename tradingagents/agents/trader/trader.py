@@ -2,6 +2,7 @@ import functools
 import time
 import json
 from ..utils.agent_trading_modes import get_trading_mode_context, get_agent_specific_context, extract_recommendation, format_final_decision
+from ..utils.report_context import get_agent_context_bundle
 from tradingagents.dataflows.alpaca_utils import AlpacaUtils
 
 # Import prompt capture utility
@@ -17,11 +18,6 @@ def create_trader(llm, memory, config=None):
     def trader_node(state, name):
         company_name = state["company_of_interest"]
         investment_plan = state["investment_plan"]
-        market_research_report = state["market_report"]
-        sentiment_report = state["sentiment_report"]
-        news_report = state["news_report"]
-        fundamentals_report = state["fundamentals_report"]
-        macro_report = state["macro_report"]
         
         # Determine current position from live Alpaca account (fallback to state)
         current_position = AlpacaUtils.get_current_position_state(company_name)
@@ -88,7 +84,17 @@ def create_trader(llm, memory, config=None):
         decision_format = trading_context["decision_format"]
         final_format = trading_context["final_format"]
 
-        curr_situation = f"{macro_report}\n\n{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
+        context_bundle = get_agent_context_bundle(
+            state,
+            agent_role="trader",
+            objective=(
+                f"Prepare a swing trading plan for {company_name}. "
+                f"Current trader plan draft: {investment_plan}"
+            ),
+            config=config,
+        )
+        analysis_context = context_bundle["analysis_context"]
+        curr_situation = context_bundle["memory_context"]
         past_memories = memory.get_memories(curr_situation, n_matches=2)
 
         past_memory_str = ""
@@ -132,6 +138,9 @@ Current Alpaca Position Status:
 Alpaca Account Status:
 {account_status_desc}
 
+Cross-Analyst Context Packet:
+{analysis_context}
+
 Your {decision_format} should be based on:
 - **Entry Point:** Specific price level for swing entry based on technical levels
 - **Target Price:** Realistic swing target based on key resistance/support levels
@@ -159,12 +168,8 @@ Always conclude with: {final_format}
             # Generate enhanced analysis prompt when investment plan is insufficient
             enhanced_prompt = f"""As a Swing Trader specializing in multi-day positions (2-10 days), provide a comprehensive trading plan for {company_name}.
 
-**AVAILABLE ANALYSIS:**
-Market Analysis: {market_research_report[:500] if market_research_report else 'Limited data available'}
-Sentiment Analysis: {sentiment_report[:300] if sentiment_report else 'Limited data available'}
-News Analysis: {news_report[:300] if news_report else 'Limited data available'}
-Fundamentals: {fundamentals_report[:300] if fundamentals_report else 'Limited data available'}
-Macro Analysis: {macro_report[:300] if macro_report else 'Limited data available'}
+**AVAILABLE ANALYSIS PACKET:**
+{analysis_context}
 
 **REQUIRED SWING TRADING PLAN:**
 Provide a detailed analysis covering:

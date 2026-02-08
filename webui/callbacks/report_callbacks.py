@@ -114,6 +114,37 @@ def normalize_markdown_tables(content):
     return normalized
 
 
+def normalize_market_markdown_sections(content):
+    """Improve readability for market report outputs that come in inline section format."""
+    if not content:
+        return content
+
+    normalized = content.replace("\r\n", "\n").replace("\r", "\n")
+    section_map = {
+        "conclusion": "Conclusion",
+        "entry conditions": "Entry Conditions",
+        "invalidation": "Invalidation",
+        "risk sizing hint": "Risk Sizing Hint",
+        "narrative": "Narrative",
+        "summary table": "Summary Table",
+    }
+
+    for raw_label, display_label in section_map.items():
+        pattern = rf"(?i)(?:^|\s)[a-f]\)\s*{re.escape(raw_label)}\b"
+        normalized = re.sub(pattern, f"\n\n## {display_label}\n", normalized)
+        inline_pattern = rf"(?i)(?:^|\s){re.escape(raw_label)}\s*:"
+        normalized = re.sub(inline_pattern, f"\n\n## {display_label}\n", normalized)
+
+    normalized = re.sub(r"(?i)\bConclude with:\s*", "\n\n", normalized)
+    normalized = re.sub(
+        r"(?i)\bFINAL TRANSACTION PROPOSAL\s*:",
+        "\n\nFINAL TRANSACTION PROPOSAL:",
+        normalized,
+    )
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized.strip()
+
+
 def create_symbol_button(symbol, index, is_active=False):
     """Create a symbol button for pagination"""
     return dbc.Button(
@@ -153,6 +184,8 @@ def create_markdown_content(content, default_message="No content available yet."
     if not content or content.strip() == "":
         content = default_message
     elif not is_loading_message:
+        if report_type == "market_report":
+            content = normalize_market_markdown_sections(content)
         content = normalize_markdown_tables(content)
     
     markdown_component = dcc.Markdown(

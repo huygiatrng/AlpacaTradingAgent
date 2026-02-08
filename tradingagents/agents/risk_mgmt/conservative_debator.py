@@ -2,6 +2,7 @@ from langchain_core.messages import AIMessage
 import time
 import json
 from ..utils.agent_trading_modes import get_trading_mode_context, get_agent_specific_context
+from ..utils.report_context import get_agent_context_bundle
 
 # Import prompt capture utility
 try:
@@ -21,12 +22,6 @@ def create_safe_debator(llm, config=None):
         current_risky_response = risk_debate_state.get("current_risky_response", "")
         current_neutral_response = risk_debate_state.get("current_neutral_response", "")
 
-        market_research_report = state["market_report"]
-        sentiment_report = state["sentiment_report"]
-        news_report = state["news_report"]
-        fundamentals_report = state["fundamentals_report"]
-        macro_report = state["macro_report"]
-
         trader_decision = state["trader_investment_plan"]
         
         # Get trading mode from config
@@ -40,6 +35,16 @@ def create_safe_debator(llm, config=None):
         actions = trading_context["actions"]
         mode_name = trading_context["mode_name"]
         decision_format = trading_context["decision_format"]
+        context_bundle = get_agent_context_bundle(
+            state,
+            agent_role="safe_debator",
+            objective=(
+                f"Build conservative risk argument for {state.get('company_of_interest', '')} "
+                f"from trader plan: {trader_decision}"
+            ),
+            config=config,
+        )
+        analysis_context = context_bundle["analysis_context"]
 
         # Use centralized trading mode context with conservative risk bias
         risk_specific_context = f"""
@@ -82,11 +87,7 @@ Here is the trader's decision:
 
 Your task is to actively counter the arguments of the Risky and Neutral Analysts, advocating for conservative {actions} and highlighting where their views may overlook potential threats or fail to prioritize sustainability. Respond directly to their points, drawing from the following data sources to build a convincing case for a low-risk approach adjustment to the trader's decision:
 
-Macro Economic Report: {macro_report}
-Market Research Report: {market_research_report}
-Social Media Sentiment Report: {sentiment_report}
-Latest World Affairs Report: {news_report}
-Company Fundamentals Report: {fundamentals_report}
+Cross-analyst context packet: {analysis_context}
 
 Here is the current conversation history: {history} 
 Here is the last response from the risky analyst: {current_risky_response} 

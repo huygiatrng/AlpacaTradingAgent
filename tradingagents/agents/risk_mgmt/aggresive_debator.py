@@ -1,6 +1,7 @@
 import time
 import json
 from ..utils.agent_trading_modes import get_trading_mode_context, get_agent_specific_context
+from ..utils.report_context import get_agent_context_bundle
 
 # Import prompt capture utility
 try:
@@ -20,12 +21,6 @@ def create_risky_debator(llm, config=None):
         current_safe_response = risk_debate_state.get("current_safe_response", "")
         current_neutral_response = risk_debate_state.get("current_neutral_response", "")
 
-        market_research_report = state["market_report"]
-        sentiment_report = state["sentiment_report"]
-        news_report = state["news_report"]
-        fundamentals_report = state["fundamentals_report"]
-        macro_report = state["macro_report"]
-
         trader_decision = state["trader_investment_plan"]
         
         # Get trading mode from config
@@ -39,6 +34,16 @@ def create_risky_debator(llm, config=None):
         actions = trading_context["actions"]
         mode_name = trading_context["mode_name"]
         decision_format = trading_context["decision_format"]
+        context_bundle = get_agent_context_bundle(
+            state,
+            agent_role="risky_debator",
+            objective=(
+                f"Build aggressive risk argument for {state.get('company_of_interest', '')} "
+                f"from trader plan: {trader_decision}"
+            ),
+            config=config,
+        )
+        analysis_context = context_bundle["analysis_context"]
 
         # Use centralized trading mode context with aggressive risk bias
         risk_specific_context = f"""
@@ -64,11 +69,7 @@ Your task is to create a compelling case for aggressive {actions} by questioning
 
 Incorporate insights from the following sources into your arguments:
 
-Macro Economic Report: {macro_report}
-Market Research Report: {market_research_report}
-Social Media Sentiment Report: {sentiment_report}
-Latest World Affairs Report: {news_report}
-Company Fundamentals Report: {fundamentals_report}
+Cross-analyst context packet: {analysis_context}
 
 Here is the current conversation history: {history} 
 Here are the last arguments from the conservative analyst: {current_safe_response} 

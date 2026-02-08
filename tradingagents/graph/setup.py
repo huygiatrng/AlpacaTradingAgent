@@ -14,6 +14,8 @@ from tradingagents.agents import *
 from tradingagents.agents.analysts.macro_analyst import create_macro_analyst
 from tradingagents.agents.utils.agent_states import AgentState
 from tradingagents.agents.utils.agent_utils import Toolkit
+from tradingagents.agents.utils.report_context import create_report_context_node
+from tradingagents.run_logger import get_run_audit_logger
 
 from .conditional_logic import ConditionalLogic
 
@@ -47,6 +49,106 @@ class GraphSetup:
         self.risk_manager_memory = risk_manager_memory
         self.conditional_logic = conditional_logic
         self.config = config
+
+    def _wrap_node_with_run_logging(self, node_name: str, node_fn):
+        """Wrap a graph node so its outputs are persisted to the per-run audit log."""
+
+        def wrapped_node(state):
+            logger = get_run_audit_logger()
+            symbol = state.get("company_of_interest")
+            start_time = time.time()
+
+            try:
+                result = node_fn(state)
+                elapsed = time.time() - start_time
+                logger.log_event(
+                    event_type="node_execution",
+                    symbol=symbol,
+                    payload={
+                        "node_name": node_name,
+                        "status": "success",
+                        "elapsed_seconds": round(elapsed, 4),
+                    },
+                )
+            except Exception as e:
+                elapsed = time.time() - start_time
+                logger.log_event(
+                    event_type="node_error",
+                    symbol=symbol,
+                    payload={
+                        "node_name": node_name,
+                        "status": "error",
+                        "elapsed_seconds": round(elapsed, 4),
+                        "error_message": str(e),
+                    },
+                )
+                raise
+
+            if not isinstance(result, dict):
+                return result
+
+            output_keys = [
+                "market_report",
+                "sentiment_report",
+                "news_report",
+                "fundamentals_report",
+                "macro_report",
+                "investment_plan",
+                "trader_investment_plan",
+                "final_trade_decision",
+            ]
+            for output_key in output_keys:
+                output_value = result.get(output_key)
+                if output_value:
+                    logger.log_agent_output(
+                        output_type=output_key,
+                        content=output_value,
+                        symbol=symbol,
+                        metadata={"node_name": node_name},
+                    )
+
+            if "report_context" in result and isinstance(result["report_context"], dict):
+                logger.log_agent_output(
+                    output_type="report_context_stats",
+                    content=result["report_context"].get("stats", {}),
+                    symbol=symbol,
+                    metadata={"node_name": node_name},
+                )
+
+            investment_debate_state = result.get("investment_debate_state")
+            if isinstance(investment_debate_state, dict):
+                current_response = investment_debate_state.get("current_response")
+                if current_response:
+                    logger.log_agent_output(
+                        output_type="investment_debate_response",
+                        content=current_response,
+                        symbol=symbol,
+                        metadata={"node_name": node_name},
+                    )
+
+            risk_debate_state = result.get("risk_debate_state")
+            if isinstance(risk_debate_state, dict):
+                latest_speaker = risk_debate_state.get("latest_speaker")
+                speaker_key_map = {
+                    "Risky": "current_risky_response",
+                    "Safe": "current_safe_response",
+                    "Neutral": "current_neutral_response",
+                }
+                speaker_response = risk_debate_state.get(speaker_key_map.get(latest_speaker, ""))
+                if speaker_response:
+                    logger.log_agent_output(
+                        output_type="risk_debate_response",
+                        content=speaker_response,
+                        symbol=symbol,
+                        metadata={
+                            "node_name": node_name,
+                            "latest_speaker": latest_speaker,
+                        },
+                    )
+
+            return result
+
+        return wrapped_node
 
     def _create_parallel_analysts_coordinator(self, selected_analysts, analyst_nodes, tool_nodes, delete_nodes):
         """Create a coordinator that runs selected analysts in parallel"""
@@ -284,62 +386,106 @@ class GraphSetup:
         tool_nodes = {}
 
         if "market" in selected_analysts:
-            analyst_nodes["market"] = create_market_analyst(
-                self.quick_thinking_llm, self.toolkit
+            analyst_nodes["market"] = self._wrap_node_with_run_logging(
+                "Market Analyst",
+                create_market_analyst(
+                    self.quick_thinking_llm, self.toolkit
+                ),
             )
             delete_nodes["market"] = create_msg_delete()
             tool_nodes["market"] = self.tool_nodes["market"]
 
         if "social" in selected_analysts:
-            analyst_nodes["social"] = create_social_media_analyst(
-                self.quick_thinking_llm, self.toolkit
+            analyst_nodes["social"] = self._wrap_node_with_run_logging(
+                "Social Analyst",
+                create_social_media_analyst(
+                    self.quick_thinking_llm, self.toolkit
+                ),
             )
             delete_nodes["social"] = create_msg_delete()
             tool_nodes["social"] = self.tool_nodes["social"]
 
         if "news" in selected_analysts:
-            analyst_nodes["news"] = create_news_analyst(
-                self.quick_thinking_llm, self.toolkit
+            analyst_nodes["news"] = self._wrap_node_with_run_logging(
+                "News Analyst",
+                create_news_analyst(
+                    self.quick_thinking_llm, self.toolkit
+                ),
             )
             delete_nodes["news"] = create_msg_delete()
             tool_nodes["news"] = self.tool_nodes["news"]
 
         if "fundamentals" in selected_analysts:
-            analyst_nodes["fundamentals"] = create_fundamentals_analyst(
-                self.quick_thinking_llm, self.toolkit
+            analyst_nodes["fundamentals"] = self._wrap_node_with_run_logging(
+                "Fundamentals Analyst",
+                create_fundamentals_analyst(
+                    self.quick_thinking_llm, self.toolkit
+                ),
             )
             delete_nodes["fundamentals"] = create_msg_delete()
             tool_nodes["fundamentals"] = self.tool_nodes["fundamentals"]
 
         if "macro" in selected_analysts:
-            analyst_nodes["macro"] = create_macro_analyst(
-                self.quick_thinking_llm, self.toolkit
+            analyst_nodes["macro"] = self._wrap_node_with_run_logging(
+                "Macro Analyst",
+                create_macro_analyst(
+                    self.quick_thinking_llm, self.toolkit
+                ),
             )
             delete_nodes["macro"] = create_msg_delete()
             tool_nodes["macro"] = self.tool_nodes["macro"]
 
         # Create researcher and manager nodes
-        bull_researcher_node = create_bull_researcher(
-            self.quick_thinking_llm, self.bull_memory
+        bull_researcher_node = self._wrap_node_with_run_logging(
+            "Bull Researcher",
+            create_bull_researcher(
+                self.quick_thinking_llm, self.bull_memory
+            ),
         )
-        bear_researcher_node = create_bear_researcher(
-            self.quick_thinking_llm, self.bear_memory
+        bear_researcher_node = self._wrap_node_with_run_logging(
+            "Bear Researcher",
+            create_bear_researcher(
+                self.quick_thinking_llm, self.bear_memory
+            ),
         )
-        research_manager_node = create_research_manager(
-            self.deep_thinking_llm, self.invest_judge_memory
+        research_manager_node = self._wrap_node_with_run_logging(
+            "Research Manager",
+            create_research_manager(
+                self.deep_thinking_llm, self.invest_judge_memory
+            ),
         )
-        trader_node = create_trader(self.deep_thinking_llm, self.trader_memory, self.config)
+        trader_node = self._wrap_node_with_run_logging(
+            "Trader",
+            create_trader(self.deep_thinking_llm, self.trader_memory, self.config),
+        )
 
         # Create risk analysis nodes
-        risky_analyst = create_risky_debator(self.quick_thinking_llm, self.config)
-        neutral_analyst = create_neutral_debator(self.quick_thinking_llm, self.config)
-        safe_analyst = create_safe_debator(self.quick_thinking_llm, self.config)
-        risk_manager_node = create_risk_manager(
-            self.deep_thinking_llm, self.risk_manager_memory, self.config
+        risky_analyst = self._wrap_node_with_run_logging(
+            "Risky Analyst",
+            create_risky_debator(self.quick_thinking_llm, self.config),
+        )
+        neutral_analyst = self._wrap_node_with_run_logging(
+            "Neutral Analyst",
+            create_neutral_debator(self.quick_thinking_llm, self.config),
+        )
+        safe_analyst = self._wrap_node_with_run_logging(
+            "Safe Analyst",
+            create_safe_debator(self.quick_thinking_llm, self.config),
+        )
+        risk_manager_node = self._wrap_node_with_run_logging(
+            "Risk Judge",
+            create_risk_manager(
+                self.deep_thinking_llm, self.risk_manager_memory, self.config
+            ),
         )
 
         # Create workflow
         workflow = StateGraph(AgentState)
+        report_context_node = self._wrap_node_with_run_logging(
+            "Build Report Context",
+            create_report_context_node(self.config),
+        )
+        workflow.add_node("Build Report Context", report_context_node)
 
         if parallel_mode:
             # Create parallel analysts coordinator
@@ -354,8 +500,9 @@ class GraphSetup:
             # Start with parallel analysts execution
             workflow.add_edge(START, "Parallel Analysts")
             
-            # After parallel analysts complete, proceed to Bull Researcher
-            workflow.add_edge("Parallel Analysts", "Bull Researcher")
+            # Build shared context packet before downstream agents consume reports.
+            workflow.add_edge("Parallel Analysts", "Build Report Context")
+            workflow.add_edge("Build Report Context", "Bull Researcher")
         else:
             # Add individual analyst nodes for sequential execution
             for analyst_type, node in analyst_nodes.items():
@@ -389,7 +536,9 @@ class GraphSetup:
                     next_analyst = f"{selected_analysts[i+1].capitalize()} Analyst"
                     workflow.add_edge(current_clear, next_analyst)
                 else:
-                    workflow.add_edge(current_clear, "Bull Researcher")
+                    workflow.add_edge(current_clear, "Build Report Context")
+
+            workflow.add_edge("Build Report Context", "Bull Researcher")
 
         # Add other nodes (common to both modes)
         workflow.add_node("Bull Researcher", bull_researcher_node)

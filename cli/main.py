@@ -20,6 +20,7 @@ from rich.rule import Rule
 
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.run_logger import get_run_audit_logger
 from cli.models import AnalystType
 from cli.utils import *
 
@@ -681,6 +682,8 @@ def run_analysis():
     graph = TradingAgentsGraph(
         [analyst.value for analyst in selections["analysts"]], config=config, debug=True
     )
+    run_logger = get_run_audit_logger()
+    run_started = False
 
     # Now start the display layout
     layout = create_layout()
@@ -726,80 +729,93 @@ def run_analysis():
             selections["ticker"], selections["analysis_date"]
         )
         args = graph.propagator.get_graph_args()
+        run_logger.start_run(
+            symbol=selections["ticker"],
+            trade_date=str(selections["analysis_date"]),
+            config=config,
+            metadata={"debug": True, "source": "cli_stream"},
+        )
+        run_started = True
+        run_logger.log_state_snapshot(
+            stage="initial_state",
+            snapshot=init_agent_state,
+            symbol=selections["ticker"],
+        )
 
         # Stream the analysis
         trace = []
-        for chunk in graph.graph.stream(init_agent_state, **args):
-            if len(chunk["messages"]) > 0:
-                # Get the last message from the chunk
-                last_message = chunk["messages"][-1]
+        try:
+            for chunk in graph.graph.stream(init_agent_state, **args):
+                if len(chunk["messages"]) > 0:
+                    # Get the last message from the chunk
+                    last_message = chunk["messages"][-1]
 
-                # Extract message content and type
-                if hasattr(last_message, "content"):
-                    content = last_message.content
-                    msg_type = "Reasoning"
-                else:
-                    content = str(last_message)
-                    msg_type = "System"
+                    # Extract message content and type
+                    if hasattr(last_message, "content"):
+                        content = last_message.content
+                        msg_type = "Reasoning"
+                    else:
+                        content = str(last_message)
+                        msg_type = "System"
 
-                # Add message to buffer
-                message_buffer.add_message(msg_type, content)
+                    # Add message to buffer
+                    message_buffer.add_message(msg_type, content)
 
-                # If it's a tool call, add it to tool calls
-                if hasattr(last_message, "tool_calls"):
-                    for tool_call in last_message.tool_calls:
-                        # Handle both dictionary and object tool calls
-                        if isinstance(tool_call, dict):
-                            message_buffer.add_tool_call(
-                                tool_call["name"], tool_call["args"]
+                    # If it's a tool call, add it to tool calls
+                    if hasattr(last_message, "tool_calls"):
+                        for tool_call in last_message.tool_calls:
+                            # Handle both dictionary and object tool calls
+                            if isinstance(tool_call, dict):
+                                message_buffer.add_tool_call(
+                                    tool_call["name"], tool_call["args"]
+                                )
+                            else:
+                                message_buffer.add_tool_call(tool_call.name, tool_call.args)
+
+                    # Update reports and agent status based on chunk content
+                    # Analyst Team Reports
+                    if "market_report" in chunk and chunk["market_report"]:
+                        message_buffer.update_report_section(
+                            "market_report", chunk["market_report"]
+                        )
+                        message_buffer.update_agent_status("Market Analyst", "completed")
+                        # Set next analyst to in_progress
+                        if "social" in selections["analysts"]:
+                            message_buffer.update_agent_status(
+                                "Social Analyst", "in_progress"
                             )
-                        else:
-                            message_buffer.add_tool_call(tool_call.name, tool_call.args)
 
-                # Update reports and agent status based on chunk content
-                # Analyst Team Reports
-                if "market_report" in chunk and chunk["market_report"]:
-                    message_buffer.update_report_section(
-                        "market_report", chunk["market_report"]
-                    )
-                    message_buffer.update_agent_status("Market Analyst", "completed")
-                    # Set next analyst to in_progress
-                    if "social" in selections["analysts"]:
-                        message_buffer.update_agent_status(
-                            "Social Analyst", "in_progress"
+                    if "sentiment_report" in chunk and chunk["sentiment_report"]:
+                        message_buffer.update_report_section(
+                            "sentiment_report", chunk["sentiment_report"]
                         )
+                        message_buffer.update_agent_status("Social Analyst", "completed")
+                        # Set next analyst to in_progress
+                        if "news" in selections["analysts"]:
+                            message_buffer.update_agent_status(
+                                "News Analyst", "in_progress"
+                            )
 
-                if "sentiment_report" in chunk and chunk["sentiment_report"]:
-                    message_buffer.update_report_section(
-                        "sentiment_report", chunk["sentiment_report"]
-                    )
-                    message_buffer.update_agent_status("Social Analyst", "completed")
-                    # Set next analyst to in_progress
-                    if "news" in selections["analysts"]:
-                        message_buffer.update_agent_status(
-                            "News Analyst", "in_progress"
+                    if "news_report" in chunk and chunk["news_report"]:
+                        message_buffer.update_report_section(
+                            "news_report", chunk["news_report"]
                         )
+                        message_buffer.update_agent_status("News Analyst", "completed")
+                        # Set next analyst to in_progress
+                        if "fundamentals" in selections["analysts"]:
+                            message_buffer.update_agent_status(
+                                "Fundamentals Analyst", "in_progress"
+                            )
 
-                if "news_report" in chunk and chunk["news_report"]:
-                    message_buffer.update_report_section(
-                        "news_report", chunk["news_report"]
-                    )
-                    message_buffer.update_agent_status("News Analyst", "completed")
-                    # Set next analyst to in_progress
-                    if "fundamentals" in selections["analysts"]:
-                        message_buffer.update_agent_status(
-                            "Fundamentals Analyst", "in_progress"
+                    if "fundamentals_report" in chunk and chunk["fundamentals_report"]:
+                        message_buffer.update_report_section(
+                            "fundamentals_report", chunk["fundamentals_report"]
                         )
-
-                if "fundamentals_report" in chunk and chunk["fundamentals_report"]:
-                    message_buffer.update_report_section(
-                        "fundamentals_report", chunk["fundamentals_report"]
-                    )
-                    message_buffer.update_agent_status(
-                        "Fundamentals Analyst", "completed"
-                    )
-                    # Set all research team members to in_progress
-                    update_research_team_status("in_progress")
+                        message_buffer.update_agent_status(
+                            "Fundamentals Analyst", "completed"
+                        )
+                        # Set all research team members to in_progress
+                        update_research_team_status("in_progress")
 
                 # Research Team - Handle Investment Debate State
                 if (
@@ -954,14 +970,31 @@ def run_analysis():
                             "Portfolio Manager", "completed"
                         )
 
-                # Update the display
-                update_display(layout)
+                    # Update the display
+                    update_display(layout)
 
-            trace.append(chunk)
+                trace.append(chunk)
 
-        # Get final state and decision
-        final_state = trace[-1]
-        decision = graph.process_signal(final_state["final_trade_decision"])
+            # Get final state and decision
+            final_state = trace[-1]
+            decision = graph.process_signal(final_state["final_trade_decision"])
+            run_logger.finish_run(
+                symbol=selections["ticker"],
+                status="completed",
+                final_state=final_state,
+                final_signal=decision,
+            )
+            run_started = False
+        except Exception as e:
+            if run_started:
+                run_logger.finish_run(
+                    symbol=selections["ticker"],
+                    status="failed",
+                    final_state=trace[-1] if trace else None,
+                    error_message=str(e),
+                )
+                run_started = False
+            raise
 
         # Update all agent statuses to completed
         for agent in message_buffer.agent_status:

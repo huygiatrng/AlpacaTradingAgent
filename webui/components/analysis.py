@@ -5,6 +5,7 @@ webui/components/analysis.py
 import time
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.run_logger import get_run_audit_logger
 from tradingagents.dataflows.alpaca_utils import AlpacaUtils
 from tradingagents.agents.utils.agent_trading_modes import extract_recommendation
 from webui.utils.state import app_state
@@ -114,6 +115,11 @@ def run_analysis(ticker, selected_analysts, research_depth_config, allow_shorts,
         research_depth_config: Either a dict with "rounds" and "level" keys,
                               or an integer for backward compatibility
     """
+    run_logger = get_run_audit_logger()
+    run_started = False
+    final_state = None
+    current_date = None
+
     try:
         # Always use current date for real-time analysis
         from datetime import datetime
@@ -150,6 +156,19 @@ def run_analysis(ticker, selected_analysts, research_depth_config, allow_shorts,
         # Initialize TradingAgentsGraph
         print(f"Initializing TradingAgentsGraph with analysts: {selected_analysts}")
         graph = TradingAgentsGraph(selected_analysts, config=config, debug=True)
+        init_agent_state = graph.propagator.create_initial_state(ticker, current_date)
+        run_logger.start_run(
+            symbol=ticker,
+            trade_date=current_date,
+            config=config,
+            metadata={"debug": True, "source": "webui_stream"},
+        )
+        run_started = True
+        run_logger.log_state_snapshot(
+            stage="initial_state",
+            snapshot=init_agent_state,
+            symbol=ticker,
+        )
         
         # Status updates are now handled in the parallel execution coordinator
         
@@ -160,7 +179,7 @@ def run_analysis(ticker, selected_analysts, research_depth_config, allow_shorts,
         print(f"Starting graph stream for {ticker} with current market data")
         trace = []
         for chunk in graph.graph.stream(
-            graph.propagator.create_initial_state(ticker, current_date), 
+            init_agent_state,
             stream_mode="values",
             config={"recursion_limit": 100}
         ):
@@ -186,6 +205,30 @@ def run_analysis(ticker, selected_analysts, research_depth_config, allow_shorts,
         # Extract final results
         final_state = trace[-1]
         decision = graph.process_signal(final_state["final_trade_decision"])
+
+        filtered_tool_calls = [
+            call for call in app_state.tool_calls_log
+            if call.get("symbol") == ticker
+        ]
+        run_logger.log_state_snapshot(
+            stage="webui_runtime_context",
+            snapshot={
+                "session_id": current_state.get("session_id"),
+                "session_start_time": current_state.get("session_start_time"),
+                "agent_prompts": current_state.get("agent_prompts", {}),
+                "tool_calls": filtered_tool_calls,
+                "llm_calls_count": app_state.llm_calls_count,
+                "tool_calls_count": app_state.tool_calls_count,
+            },
+            symbol=ticker,
+        )
+        run_logger.finish_run(
+            symbol=ticker,
+            status="completed",
+            final_state=final_state,
+            final_signal=decision,
+        )
+        run_started = False
         
         # NEW: Persist the extracted decision so the trading engine can act on it directly
         current_state["recommended_action"] = decision
@@ -228,6 +271,14 @@ def run_analysis(ticker, selected_analysts, research_depth_config, allow_shorts,
         print(f"Analysis error: {e}")
         import traceback
         traceback.print_exc()
+        if run_started:
+            run_logger.finish_run(
+                symbol=ticker,
+                status="failed",
+                final_state=final_state,
+                error_message=str(e),
+            )
+            run_started = False
         if progress is not None:
             progress(1.0)  # Complete the progress bar
     finally:

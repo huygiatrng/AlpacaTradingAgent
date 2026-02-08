@@ -22,6 +22,16 @@ DEFAULT_CONFIG = {
     "analyst_start_delay": 0.5,  # Delay in seconds between starting each analyst (to avoid API overload)
     "analyst_call_delay": 0.1,  # Delay in seconds before making analyst calls
     "tool_result_delay": 0.2,  # Delay in seconds between tool results and next analyst call
+    # Context management settings (avoid prompt overflows in downstream agents)
+    "report_context_budget_tokens": 5500,  # Max retrieved evidence budget per downstream agent call
+    "report_context_max_chunks": 16,  # Max retrieved chunks injected into any single downstream prompt
+    "report_context_min_chunks_per_report": 1,  # Ensure each non-empty analyst report is represented
+    "report_context_chunk_chars": 900,  # Chunk size used to index analyst reports
+    "report_context_chunk_overlap": 120,  # Overlap between report chunks
+    "report_context_max_points_per_report": 8,  # Coverage bullets kept per report
+    "report_context_point_chars": 220,  # Max chars per coverage bullet
+    "report_context_excerpt_chars": 420,  # Max chars per retrieved excerpt injected into prompts
+    "report_context_memory_chars": 12000,  # Max chars for memory embedding context
     # Tool settings
     "online_tools": True,
     # API keys (these will be overridden by environment variables if present)

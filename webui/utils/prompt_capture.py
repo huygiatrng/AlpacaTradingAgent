@@ -8,6 +8,7 @@ when generating reports, allowing users to view the exact prompts via "Show Prom
 import re
 from typing import Dict, Optional, Any
 from webui.utils.state import app_state
+from tradingagents.run_logger import get_run_audit_logger
 
 
 class PromptCapture:
@@ -103,6 +104,12 @@ class PromptCapture:
         """
         try:
             app_state.store_agent_prompt(report_type, prompt_content, symbol)
+            get_run_audit_logger().log_prompt(
+                report_type=report_type,
+                prompt_text=prompt_content,
+                symbol=symbol,
+                metadata={"source": "prompt_capture"},
+            )
         except Exception as e:
             print(f"[PROMPT_CAPTURE] Error storing prompt for {report_type}: {e}")
     

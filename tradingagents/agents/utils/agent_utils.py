@@ -12,6 +12,7 @@ from dateutil.relativedelta import relativedelta
 from langchain_openai import ChatOpenAI
 import tradingagents.dataflows.interface as interface
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.run_logger import get_run_audit_logger
 import json
 import time
 from functools import wraps
@@ -47,6 +48,7 @@ def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
             
             # Format tool inputs for display
             input_summary = {}
+            input_summary_full = {}
             
             # Get function signature to map args to parameter names
             import inspect
@@ -58,6 +60,7 @@ def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
                 if i < len(param_names):
                     param_name = param_names[i]
                     # Truncate long string arguments for display
+                    input_summary_full[param_name] = arg
                     if isinstance(arg, str) and len(arg) > 100:
                         input_summary[param_name] = arg[:97] + "..."
                     else:
@@ -65,6 +68,7 @@ def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
             
             # Add keyword arguments
             for key, value in kwargs.items():
+                input_summary_full[key] = value
                 if isinstance(value, str) and len(value) > 100:
                     input_summary[key] = value[:97] + "..."
                 else:
@@ -115,6 +119,16 @@ def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
                         app_state.tool_calls_log.append(tool_call_info)
                         app_state.tool_calls_count = len(app_state.tool_calls_log)
                         app_state.needs_ui_update = True
+                        get_run_audit_logger().log_tool_call(
+                            tool_name=tool_name,
+                            inputs=input_summary_full,
+                            output=tool_call_info["output"],
+                            status="timeout",
+                            execution_time_seconds=elapsed,
+                            agent_type=analyst_type,
+                            symbol=tool_call_info["symbol"],
+                            error_details=tool_call_info.get("error_details", {}),
+                        )
                         
                         # Return a timeout error message
                         return f"Error: Tool '{tool_name}' timed out after {timeout_seconds}s. This may indicate network issues, API problems, or insufficient data."
@@ -145,6 +159,15 @@ def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
                 app_state.tool_calls_count = len(app_state.tool_calls_log)
                 app_state.needs_ui_update = True
                 print(f"[TOOL TRACKER] Registered tool call: {tool_name} for {analyst_type} (Total: {app_state.tool_calls_count})")
+                get_run_audit_logger().log_tool_call(
+                    tool_name=tool_name,
+                    inputs=input_summary_full,
+                    output=result_summary,
+                    status="success",
+                    execution_time_seconds=elapsed,
+                    agent_type=analyst_type,
+                    symbol=current_symbol,
+                )
                 
                 return result
                 
@@ -206,6 +229,16 @@ def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
                     app_state.tool_calls_count = len(app_state.tool_calls_log)
                     app_state.needs_ui_update = True
                     print(f"[TOOL TRACKER] Registered failed tool call: {tool_name} for {analyst_type} (Total: {app_state.tool_calls_count})")
+                    get_run_audit_logger().log_tool_call(
+                        tool_name=tool_name,
+                        inputs=input_summary_full,
+                        output=tool_call_info["output"],
+                        status="error",
+                        execution_time_seconds=elapsed,
+                        agent_type=analyst_type,
+                        symbol=current_symbol,
+                        error_details=error_details,
+                    )
                 except Exception as track_error:
                     print(f"[TOOL TRACKER] Failed to track failed tool call: {track_error}")
                 

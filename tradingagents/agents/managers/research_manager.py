@@ -1,5 +1,6 @@
 import time
 import json
+from ..utils.report_context import get_agent_context_bundle
 
 # Import prompt capture utility
 try:
@@ -13,15 +14,19 @@ except ImportError:
 def create_research_manager(llm, memory):
     def research_manager_node(state) -> dict:
         history = state["investment_debate_state"].get("history", "")
-        market_research_report = state["market_report"]
-        sentiment_report = state["sentiment_report"]
-        news_report = state["news_report"]
-        fundamentals_report = state["fundamentals_report"]
-        macro_report = state["macro_report"]
-        
         investment_debate_state = state["investment_debate_state"]
 
-        curr_situation = f"{macro_report}\n\n{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
+        context_bundle = get_agent_context_bundle(
+            state,
+            agent_role="research_manager",
+            objective=(
+                f"Adjudicate bull/bear debate for {state.get('company_of_interest', '')} "
+                "and produce a decisive investment plan."
+            ),
+        )
+        analysis_context = context_bundle["analysis_context"]
+
+        curr_situation = context_bundle["memory_context"]
         past_memories = memory.get_memories(curr_situation, n_matches=2)
 
         past_memory_str = ""
@@ -41,6 +46,9 @@ Take into account your past mistakes on similar situations. Use these insights t
 
 Here are your past reflections on mistakes:
 \"{past_memory_str}\"
+
+Cross-analyst context packet:
+{analysis_context}
 
 Here is the debate:
 Debate History:

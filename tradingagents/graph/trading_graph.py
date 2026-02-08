@@ -18,6 +18,7 @@ from tradingagents.agents.utils.agent_states import (
     RiskDebateState,
 )
 from tradingagents.agents.utils.gpt5_llm import get_chat_model, is_gpt5_model, get_model_params_for_depth, describe_model_params
+from tradingagents.run_logger import get_run_audit_logger
 from tradingagents.dataflows.interface import set_config
 from tradingagents.dataflows.config import get_api_key
 
@@ -207,27 +208,47 @@ class TradingAgentsGraph:
         """Run the trading agents graph for a company on a specific date."""
 
         self.ticker = company_name
+        run_logger = get_run_audit_logger()
 
         # Initialize state
         init_agent_state = self.propagator.create_initial_state(
             company_name, trade_date
         )
         args = self.propagator.get_graph_args()
+        run_logger.start_run(
+            symbol=company_name,
+            trade_date=str(trade_date),
+            config=self.config,
+            metadata={"debug": self.debug},
+        )
+        run_logger.log_state_snapshot(
+            stage="initial_state",
+            snapshot=init_agent_state,
+            symbol=company_name,
+        )
 
-        if self.debug:
-            # Debug mode with tracing
-            trace = []
-            for chunk in self.graph.stream(init_agent_state, **args):
-                if len(chunk["messages"]) == 0:
-                    pass
-                else:
-                    chunk["messages"][-1].pretty_print()
-                    trace.append(chunk)
+        try:
+            if self.debug:
+                # Debug mode with tracing
+                trace = []
+                for chunk in self.graph.stream(init_agent_state, **args):
+                    if len(chunk["messages"]) == 0:
+                        pass
+                    else:
+                        chunk["messages"][-1].pretty_print()
+                        trace.append(chunk)
 
-            final_state = trace[-1]
-        else:
-            # Standard mode without tracing
-            final_state = self.graph.invoke(init_agent_state, **args)
+                final_state = trace[-1]
+            else:
+                # Standard mode without tracing
+                final_state = self.graph.invoke(init_agent_state, **args)
+        except Exception as e:
+            run_logger.finish_run(
+                symbol=company_name,
+                status="failed",
+                error_message=str(e),
+            )
+            raise
 
         # Store current state for reflection
         self.curr_state = final_state
@@ -236,7 +257,46 @@ class TradingAgentsGraph:
         self._log_state(trade_date, final_state)
 
         # Return decision and processed signal
-        return final_state, self.process_signal(final_state["final_trade_decision"])
+        try:
+            final_signal = self.process_signal(final_state["final_trade_decision"])
+            try:
+                from webui.utils.state import app_state
+
+                symbol_state = app_state.get_state(company_name) or {}
+                filtered_tool_calls = [
+                    call for call in app_state.tool_calls_log
+                    if call.get("symbol") == company_name
+                ]
+                run_logger.log_state_snapshot(
+                    stage="webui_runtime_context",
+                    snapshot={
+                        "session_id": symbol_state.get("session_id"),
+                        "session_start_time": symbol_state.get("session_start_time"),
+                        "agent_prompts": symbol_state.get("agent_prompts", {}),
+                        "tool_calls": filtered_tool_calls,
+                        "llm_calls_count": app_state.llm_calls_count,
+                        "tool_calls_count": app_state.tool_calls_count,
+                    },
+                    symbol=company_name,
+                )
+            except Exception:
+                pass
+
+            run_logger.finish_run(
+                symbol=company_name,
+                status="completed",
+                final_state=final_state,
+                final_signal=final_signal,
+            )
+            return final_state, final_signal
+        except Exception as e:
+            run_logger.finish_run(
+                symbol=company_name,
+                status="failed",
+                final_state=final_state,
+                error_message=str(e),
+            )
+            raise
 
     def _log_state(self, trade_date, final_state):
         """Log the final state to a JSON file."""
@@ -247,6 +307,7 @@ class TradingAgentsGraph:
             "sentiment_report": final_state["sentiment_report"],
             "news_report": final_state["news_report"],
             "fundamentals_report": final_state["fundamentals_report"],
+            "report_context_stats": final_state.get("report_context", {}).get("stats", {}),
             "investment_debate_state": {
                 "bull_history": final_state["investment_debate_state"]["bull_history"],
                 "bear_history": final_state["investment_debate_state"]["bear_history"],

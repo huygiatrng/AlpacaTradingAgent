@@ -84,6 +84,16 @@ class AppState:
         self.llm_calls_log.append((timestamp, "LLM_CALL", payload))
         self.llm_calls_count = len([call for call in self.llm_calls_log if call[1] == "LLM_CALL"])
         self.needs_ui_update = True
+        try:
+            from tradingagents.run_logger import get_run_audit_logger
+            symbol = self.analyzing_symbol or self.current_symbol
+            get_run_audit_logger().log_event(
+                event_type="llm_call",
+                symbol=symbol,
+                payload=payload,
+            )
+        except Exception:
+            pass
 
     def add_symbols_to_queue(self, symbols):
         """Add a list of symbols to the analysis queue."""
