@@ -27,8 +27,9 @@ from .ta_schema import (
     TechnicalBrief,
     TimeframeBrief,
     TrendState,
-    VWAPState,
     VolatilityState,
+    VolumeState,
+    VWAPState,
 )
 
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -67,6 +68,33 @@ def _rsi(close: pd.Series, period: int = 14) -> pd.Series:
     avg_loss = loss.ewm(alpha=1 / period, min_periods=period).mean()
     rs = avg_gain / avg_loss.replace(0, np.nan)
     return 100 - (100 / (1 + rs))
+
+
+def _stoch_rsi(close: pd.Series, period: int = 14, k: int = 3, d: int = 3) -> Tuple[pd.Series, pd.Series]:
+    """Stochastic RSI. Returns (K, D)."""
+    rsi = _rsi(close, period)
+    rsi_min = rsi.rolling(window=period).min()
+    rsi_max = rsi.rolling(window=period).max()
+    stoch = ((rsi - rsi_min) / (rsi_max - rsi_min)) * 100
+    k_line = stoch.rolling(window=k).mean()
+    d_line = k_line.rolling(window=d).mean()
+    return k_line, d_line
+
+
+def _adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+    """Average Directional Index."""
+    plus_dm = high.diff()
+    minus_dm = low.diff()
+    plus_dm[plus_dm < 0] = 0
+    minus_dm[minus_dm > 0] = 0
+    
+    tr = _atr(high, low, close, period=1) # TR for 1 period
+    atr = _atr(high, low, close, period=period)
+    
+    plus_di = 100 * (plus_dm.ewm(alpha=1/period).mean() / atr)
+    minus_di = 100 * (minus_dm.abs().ewm(alpha=1/period).mean() / atr)
+    dx = (abs(plus_di - minus_di) / abs(plus_di + minus_di)) * 100
+    return dx.ewm(alpha=1/period).mean()
 
 
 def _macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
@@ -155,9 +183,13 @@ def compute_indicators(
     df["ema_8"] = _ema(df["close"], 8)
     df["ema_21"] = _ema(df["close"], 21)
     df["sma_50"] = _sma(df["close"], 50)
+    df["sma_200"] = _sma(df["close"], 200)
+
+    df["adx_14"] = _adx(df["high"], df["low"], df["close"], 14)
 
     # ── Momentum ──
     df["rsi_14"] = _rsi(df["close"], 14)
+    df["stoch_k"], df["stoch_d"] = _stoch_rsi(df["close"])
     df["macd"], df["macds"], df["macdh"] = _macd(df["close"])
 
     # ── Volatility ──
@@ -166,6 +198,7 @@ def compute_indicators(
 
     # ── Volume ──
     df["obv"] = _obv(df["close"], df["volume"])
+    df["vol_sma_20"] = _sma(df["volume"], 20)
 
     # ── VWAP (use daily if available, else recalc) ──
     if "vwap" not in df.columns:
@@ -185,6 +218,7 @@ def detect_trend(df: pd.DataFrame) -> TrendState:
     ema8 = df["ema_8"].iloc[-1]
     ema21 = df["ema_21"].iloc[-1]
     sma50 = df["sma_50"].iloc[-1]
+    sma200 = float(df["sma_200"].iloc[-1]) if "sma_200" in df.columns and not pd.isna(df["sma_200"].iloc[-1]) else 0.0
 
     # Normalized EMA-8 slope (pct change over last 5 bars)
     ema8_recent = df["ema_8"].iloc[-6:]
@@ -212,6 +246,18 @@ def detect_trend(df: pd.DataFrame) -> TrendState:
 
     # HH / HL detection (simple: last 20 bars)
     hh, hl = _detect_hh_hl(df, lookback=20)
+    
+    # ADX Strength
+    adx_val = float(df["adx_14"].iloc[-1]) if "adx_14" in df.columns and not pd.isna(df["adx_14"].iloc[-1]) else 0.0
+    if adx_val > 40:
+        adx_strength = "very_strong"
+    elif adx_val > 25:
+        adx_strength = "strong"
+    else:
+        adx_strength = "weak"
+    
+    # SMA 200 Distance
+    sma200_dist = ((close - sma200) / sma200) * 100 if sma200 > 0 else 0.0
 
     return TrendState(
         direction=direction,
@@ -219,6 +265,10 @@ def detect_trend(df: pd.DataFrame) -> TrendState:
         ema_slope=round(ema_slope, 4),
         higher_highs=hh,
         higher_lows=hl,
+        adx=round(adx_val, 2),
+        trend_strength_adx=adx_strength,
+        sma_200=round(sma200, 2),
+        sma_200_dist=round(sma200_dist, 2),
     )
 
 
@@ -292,12 +342,26 @@ def detect_momentum(df: pd.DataFrame) -> MomentumState:
     else:
         hist_trend = "flat"
 
+    # Stoch RSI
+    stoch_k = float(df["stoch_k"].iloc[-1]) if "stoch_k" in df.columns and not pd.isna(df["stoch_k"].iloc[-1]) else 50.0
+    stoch_d = float(df["stoch_d"].iloc[-1]) if "stoch_d" in df.columns and not pd.isna(df["stoch_d"].iloc[-1]) else 50.0
+    
+    if stoch_k > 80:
+        stoch_state = "overbought"
+    elif stoch_k < 20:
+        stoch_state = "oversold"
+    else:
+        stoch_state = "neutral"
+
     return MomentumState(
         rsi_value=round(rsi_val, 1),
         rsi_zone=rsi_zone,
         rsi_divergence=rsi_divergence,
         macd_cross=macd_cross,
         macd_histogram_trend=hist_trend,
+        stoch_k=round(stoch_k, 2),
+        stoch_d=round(stoch_d, 2),
+        stoch_state=stoch_state,
     )
 
 
@@ -363,12 +427,59 @@ def detect_volatility(df: pd.DataFrame) -> VolatilityState:
 
     squeeze = bw_pct < 20
     breakout = bw_pct > 80
+    
+    # Gap % (only relevant for daily, but we can compute for all)
+    # Gap = (Open - Prev Close) / Prev Close
+    if len(df) >= 2:
+        curr_open = df["open"].iloc[-1]
+        prev_close = df["close"].iloc[-2]
+        gap_pct = ((curr_open - prev_close) / prev_close) * 100
+    else:
+        gap_pct = 0.0
 
     return VolatilityState(
         atr_value=round(atr_val, 4),
         atr_percentile=round(atr_pct, 1),
         squeeze=squeeze,
         breakout=breakout,
+        gap_percent=round(gap_pct, 2),
+    )
+
+
+def detect_volume(df: pd.DataFrame) -> VolumeState:
+    """Analyze volume trends and OBV slope."""
+    vol_curr = float(df["volume"].iloc[-1])
+    vol_sma = float(df["vol_sma_20"].iloc[-1]) if "vol_sma_20" in df.columns and not pd.isna(df["vol_sma_20"].iloc[-1]) else 1.0
+    
+    vol_ratio = vol_curr / vol_sma if vol_sma > 0 else 1.0
+    
+    # Volume trend (slope of SMA 20 over last 5 bars)
+    sma_recent = df["vol_sma_20"].tail(5)
+    if len(sma_recent) >= 5:
+        slope = (sma_recent.iloc[-1] / sma_recent.iloc[0]) - 1
+        if slope > 0.05:
+            vol_trend = "up"
+        elif slope < -0.05:
+            vol_trend = "down"
+        else:
+            vol_trend = "flat"
+    else:
+        vol_trend = "flat"
+
+    # OBV slope (last 5 bars)
+    obv_recent = df["obv"].tail(5)
+    if len(obv_recent) >= 5:
+        # Simple linear regression slope or just pt-to-pt
+        obv_slope = float(obv_recent.iloc[-1] - obv_recent.iloc[0])
+        # Normalize? OBV is absolute, so raw slope is hard to interpret universally without context.
+        # For now, just raw change.
+    else:
+        obv_slope = 0.0
+
+    return VolumeState(
+        vol_ma_ratio=round(vol_ratio, 2),
+        vol_trend=vol_trend,
+        obv_slope=round(obv_slope, 2),
     )
 
 
@@ -518,6 +629,34 @@ def extract_key_levels(
                 ))
             break  # only need one sub-daily
 
+    # ── Fibonacci Retracements (from daily high/low of last 200 days) ──
+    if daily_df is not None and len(daily_df) >= 30:
+        # Find major swing high/low in the lookback
+        lookback_max = daily_df["high"].max()
+        lookback_min = daily_df["low"].min()
+        
+        # Determine trend direction to apply fibs correctly? 
+        # For simplicity, we just provide the levels between min and max
+        diff = lookback_max - lookback_min
+        if diff > 0:
+            levels.append(KeyLevel(label="Fib 0.236", price=round(lookback_max - 0.236 * diff, 2), type="support" if current_close > lookback_max - 0.236 * diff else "resistance"))
+            levels.append(KeyLevel(label="Fib 0.382", price=round(lookback_max - 0.382 * diff, 2), type="support" if current_close > lookback_max - 0.382 * diff else "resistance"))
+            levels.append(KeyLevel(label="Fib 0.5", price=round(lookback_max - 0.5 * diff, 2), type="support" if current_close > lookback_max - 0.5 * diff else "resistance"))
+            levels.append(KeyLevel(label="Fib 0.618", price=round(lookback_max - 0.618 * diff, 2), type="support" if current_close > lookback_max - 0.618 * diff else "resistance"))
+
+    # ── Multi-month Highs/Lows (Resistance/Support) ──
+    if daily_df is not None and len(daily_df) >= 60:
+        # 3-Month High (approx 63 trading days)
+        lookback_3m = min(len(daily_df), 63)
+        high_3m = daily_df["high"].tail(lookback_3m).max()
+        levels.append(KeyLevel(label="3-Month High", price=round(high_3m, 2), type="resistance"))
+        
+        # 6-Month High (approx 126 trading days)
+        if len(daily_df) >= 120:
+             lookback_6m = min(len(daily_df), 126)
+             high_6m = daily_df["high"].tail(lookback_6m).max()
+             levels.append(KeyLevel(label="6-Month High", price=round(high_6m, 2), type="resistance"))
+
     # De-duplicate levels that are within 0.3 % of each other
     levels = _deduplicate_levels(levels, current_close, tolerance_pct=0.3)
 
@@ -659,6 +798,7 @@ def build_technical_brief(symbol: str, curr_date: str) -> TechnicalBrief:
             momentum=detect_momentum(df),
             vwap_state=detect_vwap_state(df),
             volatility=detect_volatility(df),
+            volume=detect_volume(df),
             market_structure=detect_market_structure(df),
         )
         tf_briefs.append(brief)

@@ -45,23 +45,25 @@ def create_market_analyst(llm, toolkit):
 
 1. **Call `get_technical_brief`** with the ticker and current date.
    You will receive a JSON object with the following pre-analyzed sections for each timeframe:
-   - `trend` – direction (bullish/bearish/neutral), strength, EMA slope, HH/HL flags
-   - `momentum` – RSI value & zone, divergence flag, MACD cross & histogram trend
+   - `trend` – direction, strength (ADX), EMA slope, HH/HL, SMA 200 & distance
+   - `momentum` – RSI, Stoch RSI (K/D), MACD cross
    - `vwap_state` – above/below VWAP with z-score distance
-   - `volatility` – ATR value & percentile, Bollinger squeeze/breakout flags
-   - `market_structure` – BOS (Break of Structure) / CHOCH (Change of Character), last swing points
+   - `volatility` – ATR, Bollinger squeeze, Gap %
+   - `volume` – Volume trend, MA ratio, OBV slope
+   - `market_structure` – BOS / CHOCH, last swing points
    Plus cross-timeframe fields:
-   - `key_levels` – 3-5 most important support/resistance/pivot levels
+   - `key_levels` – Support/Resist (incl. 3M/6M highs), Pivots, Fibs
    - `signal_summary` – classified setup type and confidence
 
-2. **Analyze the brief** — look for:
-   - **Timeframe confluence**: Do 1 h, 4 h, and 1 d agree on trend direction?
-   - **Key level proximity**: Is price near a major support/resistance?
-   - **Momentum confirmation**: Does RSI / MACD support the trend?
-   - **Volatility context**: Is a squeeze building or a breakout underway?
-   - **Market structure**: Has structure broken (BOS) or character changed (CHOCH)?
+2. **Analyze the brief** — look for *SWING TRADING* setups:
+   - **Trend Strength**: Is ADX > 25? Are we above SMA 200 (Long-term trend)?
+   - **Gap Ups**: Did price gap up (>1-2%) over a Key Level (e.g., 3-Month High)?
+   - **Oversold Bounce**: Is price far below SMA 200 but reclaiming EMA 8? Stoch RSI crossing up?
+   - **Downtrend Break**: Breakout above downtrend/SMA 200 with High Volume (Vol Ratio > 1.5)?
+   - **Entry Timing**: Look for Stoch RSI crossovers or pullback to EMA 8.
+   - **Confluence**: Do 4h and 1d agree?
 
-3. **Produce your analysis** with these required sections:
+3. **Produce your analysis** with these sections:
 
 ### a) Conclusion
 State **BULLISH**, **BEARISH**, or **NEUTRAL** with a 1-sentence rationale.

@@ -38,6 +38,12 @@ class TrendState(BaseModel):
     )
     higher_highs: bool = Field(description="Higher-high pattern detected in recent swings")
     higher_lows: bool = Field(description="Higher-low pattern detected in recent swings")
+    adx: float = Field(description="ADX trend strength (0-100)", default=0.0)
+    trend_strength_adx: Literal["weak", "strong", "very_strong"] = Field(
+        description="Qualitative strength based on ADX", default="weak"
+    )
+    sma_200: float = Field(description="200-period Simple Moving Average", default=0.0)
+    sma_200_dist: float = Field(description="Distance from SMA 200 (%)", default=0.0)
 
 
 class MomentumState(BaseModel):
@@ -53,6 +59,11 @@ class MomentumState(BaseModel):
     )
     macd_histogram_trend: Literal["expanding", "contracting", "flat"] = Field(
         description="Whether MACD histogram bars are growing or shrinking"
+    )
+    stoch_k: float = Field(description="Stochastic RSI %K (0-100)", default=50.0)
+    stoch_d: float = Field(description="Stochastic RSI %D (0-100)", default=50.0)
+    stoch_state: Literal["oversold", "neutral", "overbought"] = Field(
+        description="Stoch RSI state (<20 oversold, >80 overbought)", default="neutral"
     )
 
 
@@ -76,6 +87,15 @@ class VolatilityState(BaseModel):
     breakout: bool = Field(
         description="Volatility breakout detected (bandwidth expanding above 80th percentile)"
     )
+    gap_percent: float = Field(
+        description="Percentage gap between prev close and current open", default=0.0
+    )
+
+
+class VolumeState(BaseModel):
+    vol_ma_ratio: float = Field(description="Current volume / 20-period Volume MA")
+    vol_trend: Literal["up", "down", "flat"] = Field(description="Volume trend (slope of Volume MA)")
+    obv_slope: float = Field(description="Slope of On-Balance Volume over last 5 bars")
 
 
 class MarketStructure(BaseModel):
@@ -114,6 +134,10 @@ class TimeframeBrief(BaseModel):
     momentum: MomentumState
     vwap_state: VWAPState
     volatility: VolatilityState
+    volume: VolumeState = Field(
+        description="Volume analysis state",
+        default_factory=lambda: VolumeState(vol_ma_ratio=1.0, vol_trend="flat", obv_slope=0.0)
+    )
     market_structure: MarketStructure
 
 
