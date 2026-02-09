@@ -1,7 +1,11 @@
 import time
 import json
 from ..utils.agent_trading_modes import get_trading_mode_context, get_agent_specific_context
-from ..utils.report_context import get_agent_context_bundle
+from ..utils.report_context import (
+    get_agent_context_bundle,
+    build_debate_digest,
+    truncate_for_prompt,
+)
 
 # Import prompt capture utility
 try:
@@ -29,6 +33,7 @@ def create_risky_debator(llm, config=None):
         # Get centralized trading mode context
         trading_context = get_trading_mode_context(config, current_position)
         agent_context = get_agent_specific_context("risk_mgmt", trading_context)
+        agent_context = truncate_for_prompt(agent_context, 1400)
         
         # Get mode-specific terms for the prompt
         actions = trading_context["actions"]
@@ -39,11 +44,13 @@ def create_risky_debator(llm, config=None):
             agent_role="risky_debator",
             objective=(
                 f"Build aggressive risk argument for {state.get('company_of_interest', '')} "
-                f"from trader plan: {trader_decision}"
+                f"from trader plan: {truncate_for_prompt(trader_decision, 700)}"
             ),
             config=config,
         )
-        analysis_context = context_bundle["analysis_context"]
+        claim_matrix = context_bundle.get("decision_claim_matrix", "")
+        debate_digest = build_debate_digest(risk_debate_state, "risk", config=config)
+        all_reports_text = context_bundle.get("all_reports_text", "")
 
         # Use centralized trading mode context with aggressive risk bias
         risk_specific_context = f"""
@@ -69,11 +76,13 @@ Your task is to create a compelling case for aggressive {actions} by questioning
 
 Incorporate insights from the following sources into your arguments:
 
-Cross-analyst context packet: {analysis_context}
+Decision claim matrix: {claim_matrix}
+Full untruncated analyst reports: {all_reports_text}
+Risk debate digest: {debate_digest}
+Full conversation history: {history}
 
-Here is the current conversation history: {history} 
-Here are the last arguments from the conservative analyst: {current_safe_response} 
-Here are the last arguments from the neutral analyst: {current_neutral_response}. 
+Last conservative argument: {current_safe_response} 
+Last neutral argument: {current_neutral_response}. 
 
 If there are no responses from the other viewpoints, do not hallucinate and just present your point.
 
@@ -81,7 +90,8 @@ Engage actively by addressing any specific concerns raised, refuting the weaknes
 
 Always conclude with your recommendation using the format: {decision_format}
 
-Output conversationally as if you are speaking without any special formatting."""
+Output conversationally as if you are speaking without any special formatting.
+Keep your response concise (max 300 words)."""
 
         # Capture the COMPLETE prompt that gets sent to the LLM
         ticker = state.get("company_of_interest", "")

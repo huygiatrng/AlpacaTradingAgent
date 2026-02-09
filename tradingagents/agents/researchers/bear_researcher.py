@@ -1,7 +1,11 @@
 from langchain_core.messages import AIMessage
 import time
 import json
-from ..utils.report_context import get_agent_context_bundle
+from ..utils.report_context import (
+    get_agent_context_bundle,
+    build_debate_digest,
+    truncate_for_prompt,
+)
 
 # Import prompt capture utility
 try:
@@ -24,10 +28,12 @@ def create_bear_researcher(llm, memory):
             agent_role="bear_researcher",
             objective=(
                 f"Build a bearish thesis for {state.get('company_of_interest', '')}. "
-                f"Counter the latest bull argument: {current_response}"
+                f"Counter the latest bull argument: {truncate_for_prompt(current_response, 700)}"
             ),
         )
-        analysis_context = context_bundle["analysis_context"]
+        claim_matrix = context_bundle.get("decision_claim_matrix", "")
+        debate_digest = build_debate_digest(investment_debate_state, "investment")
+        all_reports_text = context_bundle.get("all_reports_text", "")
         curr_situation = context_bundle["memory_context"]
         past_memories = memory.get_memories(curr_situation, n_matches=2)
 
@@ -47,11 +53,14 @@ Key points to focus on:
 
 Resources available:
 
-Cross-analyst context packet: {analysis_context}
+Decision claim matrix: {claim_matrix}
+Full untruncated analyst reports: {all_reports_text}
+Debate digest: {debate_digest}
 Conversation history of the debate: {history}
 Last bull argument: {current_response}
 Reflections from similar situations and lessons learned: {past_memory_str}
 Use this information to deliver a compelling bear argument, refute the bull's claims, and engage in a dynamic debate that demonstrates the risks and weaknesses of investing in the stock. You must also address reflections and learn from lessons and mistakes you made in the past.
+Keep your response concise (max 320 words).
 """
 
         # Capture the COMPLETE prompt that gets sent to the LLM (including all dynamic content)

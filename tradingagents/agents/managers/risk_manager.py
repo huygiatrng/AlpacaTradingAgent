@@ -6,7 +6,11 @@ from ..utils.agent_trading_modes import (
     extract_recommendation,
     format_final_decision,
 )
-from ..utils.report_context import get_agent_context_bundle
+from ..utils.report_context import (
+    get_agent_context_bundle,
+    build_debate_digest,
+    truncate_for_prompt,
+)
 from tradingagents.dataflows.alpaca_utils import AlpacaUtils
 
 # Import prompt capture utility
@@ -86,6 +90,7 @@ def create_risk_manager(llm, memory, config=None):
         # Get centralized trading mode context
         trading_context = get_trading_mode_context(config, current_position)
         agent_context = get_agent_specific_context("manager", trading_context)
+        agent_context = truncate_for_prompt(agent_context, 1600)
         
         # Get mode-specific terms for the prompt
         actions = trading_context["actions"]
@@ -97,11 +102,13 @@ def create_risk_manager(llm, memory, config=None):
             agent_role="risk_manager",
             objective=(
                 f"Judge risk debate and finalize risk-adjusted trade decision for {company_name}. "
-                f"Trader plan: {trader_plan}"
+                f"Trader plan: {truncate_for_prompt(trader_plan, 700)}"
             ),
             config=config,
         )
-        analysis_context = context_bundle["analysis_context"]
+        claim_matrix = context_bundle.get("decision_claim_matrix", "")
+        risk_debate_digest = build_debate_digest(risk_debate_state, "risk", config=config)
+        all_reports_text = context_bundle.get("all_reports_text", "")
 
         curr_situation = context_bundle["memory_context"]
         past_memories = memory.get_memories(curr_situation, n_matches=2)
@@ -110,84 +117,32 @@ def create_risk_manager(llm, memory, config=None):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        # Use centralized trading mode context
-        manager_context = f"""
-{agent_context}
+        prompt = f"""{agent_context}
 
-**SWING TRADING RISK MANAGEMENT:**
-As the Swing Trading Risk Manager, you specialize in managing risks for multi-day position holds (2-10 days). Your focus areas:
+You are the final swing-trading risk judge. Make a decisive {decision_format} call with strict downside controls.
 
-**SWING TRADING RISK FACTORS:**
-1. **Multi-Day Event Risk:** Positions exposed to earnings, FOMC, or major news during the holding period
-2. **Position Sizing:** Never risk more than 1-3% of capital per swing trade
-3. **Stop Loss Management:** Use ATR-based stops (1.5-2x ATR) at key swing levels
-4. **Correlation Risk:** Avoid multiple correlated swing positions simultaneously
-5. **Market Environment:** Adjust exposure based on overall market volatility (VIX)
-6. **Trend Invalidation:** Monitor for change of character (CHOCH) or trend reversal signals
+Inputs:
+- Current position status: {open_pos_desc}
+- Position stats: {position_stats_desc}
+- Account stats: {account_status_desc}
+- Trader plan: {trader_plan}
+- Decision claim matrix: {claim_matrix}
+- Full untruncated analyst reports: {all_reports_text}
+- Risk debate digest: {risk_debate_digest}
+- Full risk debate history: {history}
+- Past lessons: {truncate_for_prompt(past_memory_str, 1200)}
 
-**RISK ASSESSMENT FRAMEWORK:**
-- **Entry Risk:** Distance to ATR-based stop vs. account size (max 3% risk)
-- **Holding Risk:** News/earnings events during the 2-10 day swing period
-- **Exit Risk:** Liquidity concerns, gap risk on adverse catalysts
-- **Portfolio Risk:** Total swing exposure across all positions (<20% of capital)
+Decision constraints:
+1. Reject proposals implying >3% account risk or unclear exits.
+2. Require explicit invalidation/stop logic.
+3. Prioritize capital preservation under elevated volatility/event risk.
 
-**POSITION SIZING CALCULATION:**
-Position Size = (Risk Amount / Stop Distance) × Share Price
-- Risk Amount: 1-3% of total capital
-- Stop Distance: Entry price - ATR-based stop loss price
-- Maximum position: Never exceed 10% of portfolio in a single swing trade
+Output format (concise):
+- Recommendation: {actions} (with confidence high/medium/low)
+- 4-6 concise bullets explaining risk rationale and required risk controls
+- End exactly with: {final_format}
 
-Current Alpaca Position Status:
-{open_pos_desc}
-
-{position_stats_desc}
-
-Alpaca Account Status:
-{account_status_desc}
-
-Cross-Analyst Context Packet:
-{analysis_context}
-
-**RISK DECISION MATRIX:**
-Consider the arguments from all three risk perspectives:
-- **Aggressive:** High-reward swing setups, wider stops, larger positions
-- **Conservative:** Tight stops, smaller positions, avoid volatile swing setups  
-- **Neutral:** Balanced approach, standard position sizing, moderate targets
-
-Your final {decision_format} decision should address:
-1. **Position Size:** Exact dollar amount or share quantity based on ATR stop distance
-2. **Risk/Reward Ratio:** Minimum 2:1, preferably 3:1 for swing trades
-3. **Time Horizon:** Confirm 2-10 day swing hold with daily monitoring
-4. **Risk Controls:** ATR-based stops, position limits, correlation checks
-5. **Market Conditions:** Factor in VIX, multi-timeframe trend strength, volume patterns
-
-Use the format: {final_format}
-
-**CRITICAL:** Reject any proposal with >3% account risk or unclear exit strategy."""
-
-        prompt = f"""{manager_context}
-
-Strive for clarity and decisiveness.
-
-Guidelines for Decision-Making:
-1. **Summarize Key Arguments**: Extract the strongest points from each analyst, focusing on relevance to the context.
-2. **Provide Rationale**: Support your recommendation with direct quotes and counterarguments from the debate.
-3. **Refine the Trader's Plan**: Start with the trader's original plan, **{trader_plan}**, and adjust it based on the analysts' insights.
-4. **Learn from Past Mistakes**: Use lessons from **{past_memory_str}** to address prior misjudgments and improve the decision you are making now to make sure you don't make a wrong recommendation that loses money.
-
-Deliverables:
-- A clear and actionable recommendation: {actions}.
-- Detailed reasoning anchored in the debate and past reflections.
-- Always conclude your response with '{final_format}' to confirm your recommendation.
-
----
-
-**Analysts Debate History:**  
-{history}
-
----
-
-Focus on actionable insights and continuous improvement. Build on past lessons, critically evaluate all perspectives, and ensure each decision advances better outcomes."""
+Keep response under 260 words."""
 
         # Capture the COMPLETE prompt that gets sent to the LLM
         capture_agent_prompt("final_trade_decision", prompt, company_name)

@@ -18,6 +18,74 @@ import time
 from functools import wraps
 
 
+TOOL_MIN_OUTPUT_CHARS = {
+    "get_stock_news_openai": 500,
+    "get_global_news_openai": 500,
+    "get_fundamentals_openai": 350,
+    "get_macro_analysis": 280,
+}
+
+INTERACTIVE_FOLLOWUP_PATTERNS = (
+    "would you like",
+    "do you want me to",
+    "i can do this, but i need",
+    "should i",
+    "want me to",
+    "i can fetch",
+)
+
+VALID_SHORT_OUTPUT_PATTERNS = (
+    "no earnings data found",
+    "not found for",
+    "no data available",
+)
+
+
+def _score_output_quality(tool_name: str, output: object) -> dict:
+    text = str(output or "").strip()
+    lower = text.lower()
+    flags = []
+
+    if not text:
+        flags.append("empty_output")
+
+    if any(pattern in lower for pattern in INTERACTIVE_FOLLOWUP_PATTERNS):
+        flags.append("interactive_followup")
+
+    if lower.startswith("error:") or lower.startswith("exception:"):
+        flags.append("error_prefixed_output")
+
+    min_chars = TOOL_MIN_OUTPUT_CHARS.get(tool_name, 0)
+    if min_chars and len(text) < min_chars:
+        if not any(pattern in lower for pattern in VALID_SHORT_OUTPUT_PATTERNS):
+            flags.append("undersized_output")
+
+    suspect = any(
+        flag in ("empty_output", "interactive_followup", "undersized_output")
+        for flag in flags
+    )
+    retry_recommended = suspect and "error_prefixed_output" not in flags
+
+    score = 1.0
+    for flag in flags:
+        if flag in ("empty_output", "interactive_followup"):
+            score -= 0.4
+        elif flag == "undersized_output":
+            score -= 0.2
+        elif flag == "error_prefixed_output":
+            score -= 0.1
+    score = max(0.0, round(score, 3))
+
+    return {
+        "score": score,
+        "flags": flags,
+        "is_suspect": suspect,
+        "retry_recommended": retry_recommended,
+        "output_chars": len(text),
+        "output_preview": text[:220],
+    }
+
+
 def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
     """
     Decorator to time function calls and track them for UI display with timeout protection
@@ -82,24 +150,31 @@ def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
                 import datetime
                 timestamp = datetime.datetime.now().strftime("%H:%M:%S")
                 
-                # Execute the function with timeout protection
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(run_function)
+                # Execute the function with timeout protection + semantic retry
+                semantic_retry_enabled = Toolkit._config.get("tool_semantic_retry_enabled", True)
+                max_semantic_retries = int(Toolkit._config.get("tool_semantic_retry_max_retries", 1))
+                retry_backoff_seconds = float(Toolkit._config.get("tool_semantic_retry_backoff_seconds", 0.8))
+
+                def _execute_once():
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(run_function)
+                        return future.result(timeout=timeout_seconds)
+
+                retry_count = 0
+                quality_details = {}
+                first_quality = {}
+                result = None
+                best_result = None
+                best_quality = None
+
+                while True:
                     try:
-                        # Wait for the function to complete with timeout
-                        result = future.result(timeout=timeout_seconds)
-                        
-                        # Check for very slow execution (warn if > 30s)
-                        partial_elapsed = time.time() - start_time
-                        if partial_elapsed > 120:
-                            print(f"[{analyst_type}] ⚠️ Slow execution warning: {tool_name} took {partial_elapsed:.1f}s")
-                            
+                        result = _execute_once()
                     except concurrent.futures.TimeoutError:
                         elapsed = time.time() - start_time
                         timeout_msg = f"TIMEOUT: Tool '{tool_name}' exceeded {timeout_seconds}s limit (stopped at {elapsed:.1f}s)"
                         print(f"[{analyst_type}] ⏰ {timeout_msg}")
-                        
-                        # Store timeout info
+
                         tool_call_info = {
                             "timestamp": timestamp,
                             "tool_name": tool_name,
@@ -113,9 +188,10 @@ def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
                                 "error_type": "TimeoutError",
                                 "timeout_seconds": timeout_seconds,
                                 "actual_time": elapsed
-                            }
+                            },
+                            "retry_count": retry_count,
                         }
-                        
+
                         app_state.tool_calls_log.append(tool_call_info)
                         app_state.tool_calls_count = len(app_state.tool_calls_log)
                         app_state.needs_ui_update = True
@@ -128,10 +204,62 @@ def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
                             agent_type=analyst_type,
                             symbol=tool_call_info["symbol"],
                             error_details=tool_call_info.get("error_details", {}),
+                            quality_details={"flags": ["timeout"], "is_suspect": True},
+                            retry_count=retry_count,
                         )
-                        
-                        # Return a timeout error message
+
                         return f"Error: Tool '{tool_name}' timed out after {timeout_seconds}s. This may indicate network issues, API problems, or insufficient data."
+
+                    # Check for very slow execution
+                    partial_elapsed = time.time() - start_time
+                    if partial_elapsed > 120:
+                        print(f"[{analyst_type}] ⚠️ Slow execution warning: {tool_name} took {partial_elapsed:.1f}s")
+
+                    quality = _score_output_quality(tool_name, result)
+                    if not first_quality:
+                        first_quality = quality
+
+                    if (
+                        best_quality is None
+                        or quality["score"] > best_quality["score"]
+                        or (
+                            quality["score"] == best_quality["score"]
+                            and quality["output_chars"] > best_quality["output_chars"]
+                        )
+                    ):
+                        best_quality = quality
+                        best_result = result
+
+                    should_retry = (
+                        uses_web_search
+                        and semantic_retry_enabled
+                        and retry_count < max_semantic_retries
+                        and quality.get("retry_recommended", False)
+                    )
+                    if not should_retry:
+                        quality_details = quality
+                        break
+
+                    retry_count += 1
+                    get_run_audit_logger().log_event(
+                        event_type="tool_retry",
+                        symbol=getattr(app_state, "analyzing_symbol", None) or getattr(app_state, "current_symbol", None),
+                        payload={
+                            "tool_name": tool_name,
+                            "agent_type": analyst_type,
+                            "retry_count": retry_count,
+                            "reason": quality.get("flags", []),
+                        },
+                    )
+                    print(
+                        f"[{analyst_type}] 🔄 Retrying tool '{tool_name}' (attempt {retry_count + 1}) "
+                        f"due to quality flags: {quality.get('flags', [])}"
+                    )
+                    time.sleep(retry_backoff_seconds)
+
+                if best_result is not None and best_quality is not None:
+                    result = best_result
+                    quality_details = best_quality
                 
                 # Calculate execution time
                 elapsed = time.time() - start_time
@@ -152,7 +280,10 @@ def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
                     "execution_time": f"{elapsed:.2f}s",
                     "status": "success",
                     "agent_type": analyst_type,  # Add agent type for filtering
-                    "symbol": current_symbol  # Add symbol for filtering
+                    "symbol": current_symbol,  # Add symbol for filtering
+                    "retry_count": retry_count,
+                    "quality_details": quality_details,
+                    "initial_quality": first_quality or quality_details,
                 }
                 
                 app_state.tool_calls_log.append(tool_call_info)
@@ -167,6 +298,8 @@ def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
                     execution_time_seconds=elapsed,
                     agent_type=analyst_type,
                     symbol=current_symbol,
+                    quality_details=quality_details,
+                    retry_count=retry_count,
                 )
                 
                 return result
@@ -238,6 +371,8 @@ def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
                         agent_type=analyst_type,
                         symbol=current_symbol,
                         error_details=error_details,
+                        quality_details={"flags": ["runtime_error"], "is_suspect": True},
+                        retry_count=0,
                     )
                 except Exception as track_error:
                     print(f"[TOOL TRACKER] Failed to track failed tool call: {track_error}")

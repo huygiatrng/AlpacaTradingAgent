@@ -1,6 +1,10 @@
 import time
 import json
-from ..utils.report_context import get_agent_context_bundle
+from ..utils.report_context import (
+    get_agent_context_bundle,
+    build_debate_digest,
+    truncate_for_prompt,
+)
 
 # Import prompt capture utility
 try:
@@ -24,7 +28,9 @@ def create_research_manager(llm, memory):
                 "and produce a decisive investment plan."
             ),
         )
-        analysis_context = context_bundle["analysis_context"]
+        claim_matrix = context_bundle.get("decision_claim_matrix", "")
+        debate_digest = build_debate_digest(investment_debate_state, "investment")
+        all_reports_text = context_bundle.get("all_reports_text", "")
 
         curr_situation = context_bundle["memory_context"]
         past_memories = memory.get_memories(curr_situation, n_matches=2)
@@ -33,26 +39,26 @@ def create_research_manager(llm, memory):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        prompt = f"""As the portfolio manager and debate facilitator, your role is to critically evaluate this round of debate and make a definitive decision: align with the bear analyst, the bull analyst, or choose Hold only if it is strongly justified based on the arguments presented.
+        prompt = f"""As the portfolio manager and debate facilitator, decide a clear action (Buy/Sell/Hold) from the strongest evidence, then provide an executable swing plan.
 
-Summarize the key points from both sides concisely, focusing on the most compelling evidence or reasoning. Your recommendation—Buy, Sell, or Hold—must be clear and actionable. Avoid defaulting to Hold simply because both sides have valid points; commit to a stance grounded in the debate's strongest arguments.
+Use these inputs:
+- Decision claim matrix: {claim_matrix}
+- Full untruncated analyst reports: {all_reports_text}
+- Debate digest: {debate_digest}
+- Past reflections: {truncate_for_prompt(past_memory_str, 1400)}
+- Full debate history: {history}
 
-Additionally, develop a detailed investment plan for the trader. This should include:
+Output requirements:
+1. Recommendation (Buy/Sell/Hold) with confidence (high/medium/low).
+2. 3-5 key reasons tied to evidence.
+3. Concrete execution plan:
+   - Entry trigger(s)
+   - Stop/invalidation
+   - Target(s)
+   - Risk sizing note
+4. End with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**
 
-Your Recommendation: A decisive stance supported by the most convincing arguments.
-Rationale: An explanation of why these arguments lead to your conclusion.
-Strategic Actions: Concrete steps for implementing the recommendation.
-Take into account your past mistakes on similar situations. Use these insights to refine your decision-making and ensure you are learning and improving. Present your analysis conversationally, as if speaking naturally, without special formatting. 
-
-Here are your past reflections on mistakes:
-\"{past_memory_str}\"
-
-Cross-analyst context packet:
-{analysis_context}
-
-Here is the debate:
-Debate History:
-{history}"""
+Keep it concise and actionable (max 420 words)."""
 
         # Capture the COMPLETE prompt that gets sent to the LLM
         ticker = state.get("company_of_interest", "")

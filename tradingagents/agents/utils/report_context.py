@@ -24,6 +24,13 @@ DEFAULT_CONTEXT_CONFIG = {
     "report_context_point_chars": 220,
     "report_context_excerpt_chars": 420,
     "report_context_memory_chars": 12000,
+    "report_context_compact_points_per_report": 3,
+    "report_context_compact_point_chars": 180,
+    "report_context_compact_excerpt_chars": 240,
+    "report_context_compact_max_excerpts": 8,
+    "debate_digest_max_messages": 6,
+    "debate_digest_message_chars": 520,
+    "debate_digest_total_chars": 2600,
 }
 
 
@@ -174,6 +181,97 @@ def _truncate(text: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
     return text[: max_chars - 3].rstrip() + "..."
+
+
+def truncate_for_prompt(text: Any, max_chars: int = 1200) -> str:
+    """Normalize any value for prompt injection without truncation."""
+    normalized = _normalize_text(text)
+    if not normalized:
+        return ""
+    return normalized
+
+
+def _classify_signal(point: str) -> str:
+    lower = point.lower()
+    bullish_hits = 0
+    bearish_hits = 0
+
+    bullish_terms = (
+        "bullish",
+        "uptrend",
+        "breakout",
+        "support",
+        "beat",
+        "upgrade",
+        "momentum",
+        "long",
+        "buy",
+        "risk-on",
+        "improve",
+        "strong",
+    )
+    bearish_terms = (
+        "bearish",
+        "downtrend",
+        "breakdown",
+        "resistance",
+        "miss",
+        "downgrade",
+        "risk-off",
+        "volatility",
+        "stop",
+        "short",
+        "sell",
+        "weak",
+        "headwind",
+    )
+
+    for term in bullish_terms:
+        if term in lower:
+            bullish_hits += 1
+    for term in bearish_terms:
+        if term in lower:
+            bearish_hits += 1
+
+    if bullish_hits > bearish_hits:
+        return "Bullish"
+    if bearish_hits > bullish_hits:
+        return "Bearish"
+    return "Mixed"
+
+
+def _render_decision_claim_matrix(
+    context: Dict[str, Any],
+    config: Dict[str, Any] | None = None,
+) -> str:
+    cfg = _get_context_config(config)
+    max_points = int(cfg["report_context_compact_points_per_report"])
+    point_chars = int(cfg["report_context_compact_point_chars"])
+
+    lines: List[str] = []
+    lines.append("Decision Claim Matrix (compressed):")
+    for report_key, _ in REPORT_SPECS:
+        report_meta = context.get("reports", {}).get(report_key)
+        if not report_meta:
+            continue
+
+        points = report_meta.get("coverage_points", [])[:max_points]
+        if not points:
+            lines.append(f"- {report_meta['label']}: No usable claims.")
+            continue
+
+        signal_votes = {"Bullish": 0, "Bearish": 0, "Mixed": 0}
+        rendered_points: List[str] = []
+        for point in points:
+            signal = _classify_signal(point)
+            signal_votes[signal] += 1
+            rendered_points.append(_truncate(point, point_chars))
+
+        dominant = max(signal_votes, key=signal_votes.get)
+        joined_points = " | ".join(rendered_points)
+        lines.append(f"- {report_meta['label']} [{dominant}]: {joined_points}")
+
+    return "\n".join(lines).strip()
 
 
 def _split_sections(text: str) -> List[Tuple[str, str]]:
@@ -560,6 +658,40 @@ def _render_analysis_context(
     return "\n".join(lines).strip()
 
 
+def _render_analysis_context_compact(
+    context: Dict[str, Any],
+    selected_chunks: List[Dict[str, Any]],
+    config: Dict[str, Any] | None = None,
+) -> str:
+    cfg = _get_context_config(config)
+    excerpt_chars = int(cfg["report_context_compact_excerpt_chars"])
+    max_excerpts = int(cfg["report_context_compact_max_excerpts"])
+
+    lines: List[str] = []
+    lines.append("Cross-Analyst Context Packet (Compact)")
+    lines.append("Use this compact packet for fast decisioning with full report coverage preserved.")
+    lines.append("")
+
+    global_overview = context.get("global_overview", "").strip()
+    if global_overview:
+        lines.append("Topline Overview:")
+        lines.append(global_overview)
+        lines.append("")
+
+    lines.append(_render_decision_claim_matrix(context, config=config))
+    lines.append("")
+
+    if selected_chunks:
+        lines.append("Top Evidence Excerpts:")
+        for chunk in selected_chunks[:max_excerpts]:
+            excerpt = _truncate(chunk["text"].replace("\n", " "), excerpt_chars)
+            lines.append(
+                f"[{chunk['id']} | {chunk['report_label']} | {chunk['section_title']}] {excerpt}"
+            )
+
+    return "\n".join(lines).strip()
+
+
 def _render_memory_context(
     context: Dict[str, Any],
     config: Dict[str, Any] | None = None,
@@ -584,6 +716,83 @@ def _render_memory_context(
 
     rendered = "\n".join(lines).strip()
     return _truncate(rendered, max_chars)
+
+
+def _render_all_reports_text(state: Dict[str, Any]) -> str:
+    """Render full analyst reports without truncation so downstream agents can access all data."""
+    lines: List[str] = []
+    lines.append("Full Analyst Reports (Untruncated):")
+    for report_key, report_label in REPORT_SPECS:
+        raw_text = _normalize_text(state.get(report_key, ""))
+        if not raw_text:
+            continue
+        lines.append(f"### {report_label}")
+        lines.append(raw_text)
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
+def _short_message_line(message: str, label: str, max_chars: int) -> str:
+    msg = _normalize_text(message)
+    if msg.lower().startswith(label.lower() + ":"):
+        msg = msg.split(":", 1)[1].strip()
+    return _truncate(msg, max_chars)
+
+
+def build_debate_digest(
+    debate_state: Dict[str, Any] | None,
+    debate_type: str,
+    config: Dict[str, Any] | None = None,
+) -> str:
+    """Build a compact digest for either investment or risk debate states."""
+    if not isinstance(debate_state, dict):
+        return ""
+
+    cfg = _get_context_config(config)
+    max_messages = int(cfg["debate_digest_max_messages"])
+    msg_chars = int(cfg["debate_digest_message_chars"])
+    total_chars = int(cfg["debate_digest_total_chars"])
+
+    lines: List[str] = []
+    if debate_type == "investment":
+        lines.append("Investment Debate Digest:")
+        lines.append(f"- Turn count: {debate_state.get('count', 0)}")
+        current = truncate_for_prompt(debate_state.get("current_response", ""), msg_chars)
+        if current:
+            lines.append(f"- Latest response: {current}")
+
+        bull_messages = list(debate_state.get("bull_messages", []))[-max_messages:]
+        bear_messages = list(debate_state.get("bear_messages", []))[-max_messages:]
+        for message in bull_messages[-max_messages // 2 :]:
+            lines.append(f"- Bull: {_short_message_line(message, 'Bull Analyst', msg_chars)}")
+        for message in bear_messages[-max_messages // 2 :]:
+            lines.append(f"- Bear: {_short_message_line(message, 'Bear Analyst', msg_chars)}")
+    else:
+        lines.append("Risk Debate Digest:")
+        lines.append(f"- Turn count: {debate_state.get('count', 0)}")
+        lines.append(f"- Latest speaker: {debate_state.get('latest_speaker', 'Unknown')}")
+
+        latest_map = [
+            ("Risky", debate_state.get("current_risky_response", "")),
+            ("Safe", debate_state.get("current_safe_response", "")),
+            ("Neutral", debate_state.get("current_neutral_response", "")),
+        ]
+        for label, content in latest_map:
+            compact = truncate_for_prompt(content, msg_chars)
+            if compact:
+                lines.append(f"- {label} latest: {compact}")
+
+        msg_sources = [
+            ("Risky", list(debate_state.get("risky_messages", []))),
+            ("Safe", list(debate_state.get("safe_messages", []))),
+            ("Neutral", list(debate_state.get("neutral_messages", []))),
+        ]
+        per_agent = max(1, max_messages // 3)
+        for label, messages in msg_sources:
+            for message in messages[-per_agent:]:
+                lines.append(f"- {label}: {_short_message_line(message, f'{label} Analyst', msg_chars)}")
+
+    return _truncate("\n".join(lines).strip(), total_chars)
 
 
 def ensure_report_context(
@@ -614,11 +823,18 @@ def get_agent_context_bundle(
     )
 
     analysis_context = _render_analysis_context(context, selected_chunks, config=config)
+    analysis_context_compact = _render_analysis_context_compact(
+        context, selected_chunks, config=config
+    )
+    decision_claim_matrix = _render_decision_claim_matrix(context, config=config)
     memory_context = _render_memory_context(context, config=config)
 
     return {
         "analysis_context": analysis_context,
+        "analysis_context_compact": analysis_context_compact,
+        "decision_claim_matrix": decision_claim_matrix,
         "memory_context": memory_context,
+        "all_reports_text": _render_all_reports_text(state),
         "selected_chunk_ids": [chunk["id"] for chunk in selected_chunks],
         "context_stats": context.get("stats", {}),
     }

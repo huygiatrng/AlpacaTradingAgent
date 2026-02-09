@@ -19,7 +19,9 @@ DEFAULT_CONFIG = {
     "allow_shorts": False,  # False = Investment mode (BUY/HOLD/SELL), True = Trading mode (LONG/NEUTRAL/SHORT)
     # Execution settings
     "parallel_analysts": True,  # True = Run analysts in parallel for faster execution, False = Sequential execution
+    "parallel_risk_first_round": True,  # Run Risky/Safe/Neutral in parallel only for round 1, then revert to linear flow
     "analyst_start_delay": 0.5,  # Delay in seconds between starting each analyst (to avoid API overload)
+    "risk_analyst_start_delay": 0.35,  # Delay between starting first-round risk analysts in parallel mode
     "analyst_call_delay": 0.1,  # Delay in seconds before making analyst calls
     "tool_result_delay": 0.2,  # Delay in seconds between tool results and next analyst call
     # Context management settings (avoid prompt overflows in downstream agents)
@@ -32,8 +34,18 @@ DEFAULT_CONFIG = {
     "report_context_point_chars": 220,  # Max chars per coverage bullet
     "report_context_excerpt_chars": 420,  # Max chars per retrieved excerpt injected into prompts
     "report_context_memory_chars": 12000,  # Max chars for memory embedding context
+    "report_context_compact_points_per_report": 3,  # Claims per report for compact downstream packet
+    "report_context_compact_point_chars": 180,  # Max chars per compact claim
+    "report_context_compact_excerpt_chars": 240,  # Max chars per compact evidence excerpt
+    "report_context_compact_max_excerpts": 8,  # Max compact evidence excerpts injected per prompt
+    "debate_digest_max_messages": 6,  # Max recent debate messages included in compact debate digest
+    "debate_digest_message_chars": 520,  # Max chars per message in debate digest
+    "debate_digest_total_chars": 2600,  # Total max chars for debate digest block
     # Tool settings
     "online_tools": True,
+    "tool_semantic_retry_enabled": True,  # Retry web-search tool calls once on low-quality interactive/undersized output
+    "tool_semantic_retry_max_retries": 1,
+    "tool_semantic_retry_backoff_seconds": 0.8,
     # API keys (these will be overridden by environment variables if present)
     "openai_api_key": None,
     "finnhub_api_key": None,

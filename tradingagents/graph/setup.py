@@ -361,6 +361,121 @@ class GraphSetup:
         
         return parallel_analysts_execution
 
+    def _create_parallel_risk_round_one_coordinator(self, risk_nodes):
+        """Run Risky/Safe/Neutral analysts in parallel for round 1 only."""
+
+        def _append_history(existing: str, new_text: str) -> str:
+            existing = (existing or "").strip()
+            new_text = (new_text or "").strip()
+            if not new_text:
+                return existing
+            if not existing:
+                return new_text
+            return f"{existing}\n{new_text}"
+
+        def parallel_risk_round_one(state: AgentState):
+            print("[RISK_PARALLEL] Starting first-round parallel execution")
+
+            ui_available = False
+            try:
+                from webui.utils.state import app_state
+                ui_available = True
+            except ImportError:
+                app_state = None
+
+            if ui_available:
+                for analyst_name in ("Risky Analyst", "Safe Analyst", "Neutral Analyst"):
+                    app_state.update_agent_status(analyst_name, "in_progress")
+
+            def execute_single(analyst_name: str, analyst_node):
+                local_state = copy.deepcopy(state)
+                try:
+                    result_state = analyst_node(local_state)
+                    if ui_available:
+                        app_state.update_agent_status(analyst_name, "completed")
+                    return analyst_name, result_state
+                except Exception as e:
+                    print(f"[RISK_PARALLEL] Error in {analyst_name}: {e}")
+                    if ui_available:
+                        app_state.update_agent_status(analyst_name, "completed")
+                    return analyst_name, local_state
+
+            completed_results = {}
+            analyst_start_delay = self.config.get(
+                "risk_analyst_start_delay",
+                self.config.get("analyst_start_delay", 0.5),
+            )
+            analyst_order = [
+                ("Risky Analyst", risk_nodes["Risky"]),
+                ("Safe Analyst", risk_nodes["Safe"]),
+                ("Neutral Analyst", risk_nodes["Neutral"]),
+            ]
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                futures = {}
+                for i, (analyst_name, analyst_node) in enumerate(analyst_order):
+                    if i > 0:
+                        time.sleep(analyst_start_delay)
+                    fut = executor.submit(execute_single, analyst_name, analyst_node)
+                    futures[fut] = analyst_name
+
+                for future in concurrent.futures.as_completed(futures):
+                    analyst_name = futures[future]
+                    try:
+                        result_name, result_state = future.result()
+                        completed_results[result_name] = result_state
+                        print(f"[RISK_PARALLEL] {result_name} completed")
+                    except Exception as e:
+                        print(f"[RISK_PARALLEL] {analyst_name} failed: {e}")
+                        completed_results[analyst_name] = copy.deepcopy(state)
+
+            base = copy.deepcopy(state.get("risk_debate_state", {}))
+            merged = {
+                "history": base.get("history", ""),
+                "risky_history": base.get("risky_history", ""),
+                "safe_history": base.get("safe_history", ""),
+                "neutral_history": base.get("neutral_history", ""),
+                "risky_messages": list(base.get("risky_messages", [])),
+                "safe_messages": list(base.get("safe_messages", [])),
+                "neutral_messages": list(base.get("neutral_messages", [])),
+                "latest_speaker": base.get("latest_speaker", "Risky"),
+                "current_risky_response": base.get("current_risky_response", ""),
+                "current_safe_response": base.get("current_safe_response", ""),
+                "current_neutral_response": base.get("current_neutral_response", ""),
+                "judge_decision": base.get("judge_decision", ""),
+                "count": int(base.get("count", 0)),
+            }
+
+            merge_spec = [
+                ("Risky Analyst", "current_risky_response", "risky_history", "risky_messages", "Risky"),
+                ("Safe Analyst", "current_safe_response", "safe_history", "safe_messages", "Safe"),
+                ("Neutral Analyst", "current_neutral_response", "neutral_history", "neutral_messages", "Neutral"),
+            ]
+
+            appended_count = 0
+            for analyst_name, current_key, history_key, messages_key, speaker_label in merge_spec:
+                result_state = completed_results.get(analyst_name, {})
+                result_debate = result_state.get("risk_debate_state", {})
+                response_text = (result_debate.get(current_key, "") or "").strip()
+                if not response_text:
+                    continue
+
+                merged[current_key] = response_text
+                merged[history_key] = _append_history(merged.get(history_key, ""), response_text)
+                merged[messages_key].append(response_text)
+                merged["history"] = _append_history(merged.get("history", ""), response_text)
+                merged["latest_speaker"] = speaker_label
+                appended_count += 1
+
+            merged["count"] = int(base.get("count", 0)) + appended_count
+            print(
+                f"[RISK_PARALLEL] Merge complete: "
+                f"count={merged['count']}, latest={merged['latest_speaker']}"
+            )
+            return {"risk_debate_state": merged}
+
+        return parallel_risk_round_one
+
     def setup_graph(
         self, selected_analysts=["market", "social", "news", "fundamentals", "macro"]
     ):
@@ -478,6 +593,7 @@ class GraphSetup:
                 self.deep_thinking_llm, self.risk_manager_memory, self.config
             ),
         )
+        parallel_risk_round_one_mode = self.config.get("parallel_risk_first_round", True)
 
         # Create workflow
         workflow = StateGraph(AgentState)
@@ -549,6 +665,18 @@ class GraphSetup:
         workflow.add_node("Neutral Analyst", neutral_analyst)
         workflow.add_node("Safe Analyst", safe_analyst)
         workflow.add_node("Risk Judge", risk_manager_node)
+        if parallel_risk_round_one_mode:
+            parallel_risk_round_one_node = self._wrap_node_with_run_logging(
+                "Parallel Risk Round 1",
+                self._create_parallel_risk_round_one_coordinator(
+                    {
+                        "Risky": risky_analyst,
+                        "Safe": safe_analyst,
+                        "Neutral": neutral_analyst,
+                    }
+                ),
+            )
+            workflow.add_node("Parallel Risk Round 1", parallel_risk_round_one_node)
 
         # Add remaining edges (unchanged from original)
         workflow.add_conditional_edges(
@@ -568,7 +696,20 @@ class GraphSetup:
             },
         )
         workflow.add_edge("Research Manager", "Trader")
-        workflow.add_edge("Trader", "Risky Analyst")
+        if parallel_risk_round_one_mode:
+            workflow.add_edge("Trader", "Parallel Risk Round 1")
+            workflow.add_conditional_edges(
+                "Parallel Risk Round 1",
+                self.conditional_logic.should_continue_risk_analysis,
+                {
+                    "Risky Analyst": "Risky Analyst",
+                    "Safe Analyst": "Safe Analyst",
+                    "Neutral Analyst": "Neutral Analyst",
+                    "Risk Judge": "Risk Judge",
+                },
+            )
+        else:
+            workflow.add_edge("Trader", "Risky Analyst")
         workflow.add_conditional_edges(
             "Risky Analyst",
             self.conditional_logic.should_continue_risk_analysis,

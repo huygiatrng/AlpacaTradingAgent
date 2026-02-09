@@ -2,7 +2,11 @@ import functools
 import time
 import json
 from ..utils.agent_trading_modes import get_trading_mode_context, get_agent_specific_context, extract_recommendation, format_final_decision
-from ..utils.report_context import get_agent_context_bundle
+from ..utils.report_context import (
+    get_agent_context_bundle,
+    build_debate_digest,
+    truncate_for_prompt,
+)
 from tradingagents.dataflows.alpaca_utils import AlpacaUtils
 
 # Import prompt capture utility
@@ -77,6 +81,7 @@ def create_trader(llm, memory, config=None):
         # Get centralized trading mode context
         trading_context = get_trading_mode_context(config, current_position)
         agent_context = get_agent_specific_context("trader", trading_context)
+        agent_context = truncate_for_prompt(agent_context, 1600)
         
         # Get mode-specific terms for the prompt
         actions = trading_context["actions"]
@@ -89,11 +94,14 @@ def create_trader(llm, memory, config=None):
             agent_role="trader",
             objective=(
                 f"Prepare a swing trading plan for {company_name}. "
-                f"Current trader plan draft: {investment_plan}"
+                f"Current trader plan draft: {truncate_for_prompt(investment_plan, 700)}"
             ),
             config=config,
         )
-        analysis_context = context_bundle["analysis_context"]
+        analysis_context = context_bundle.get("analysis_context_compact", context_bundle["analysis_context"])
+        claim_matrix = context_bundle.get("decision_claim_matrix", "")
+        debate_digest = build_debate_digest(state.get("investment_debate_state"), "investment", config=config)
+        all_reports_text = context_bundle.get("all_reports_text", "")
         curr_situation = context_bundle["memory_context"]
         past_memories = memory.get_memories(curr_situation, n_matches=2)
 
@@ -138,8 +146,14 @@ Current Alpaca Position Status:
 Alpaca Account Status:
 {account_status_desc}
 
-Cross-Analyst Context Packet:
-{analysis_context}
+Decision Claim Matrix:
+{claim_matrix}
+
+Full Untruncated Analyst Reports:
+{all_reports_text}
+
+Investment Debate Digest:
+{debate_digest}
 
 Your {decision_format} should be based on:
 - **Entry Point:** Specific price level for swing entry based on technical levels
@@ -202,7 +216,7 @@ Focus on actionable swing trading insights with specific price levels and risk m
             # Use original context with valid investment plan
             context = {
                 "role": "user",
-                "content": f"Based on comprehensive swing trading analysis by specialist analysts, here is a swing trading plan for {company_name}. This plan incorporates multi-timeframe technical analysis (1h/4h/1d), key levels, and volume analysis optimized for multi-day swing positions.\n\nProposed Swing Trading Plan: {investment_plan}\n\nMake your swing trading decision focusing on clear entry points, swing targets, and ATR-based stop losses with proper risk management for a 2-10 day holding period.",
+                "content": f"Based on comprehensive swing trading analysis by specialist analysts, here is a swing trading plan for {company_name}. This plan incorporates multi-timeframe technical analysis (1h/4h/1d), key levels, and volume analysis optimized for multi-day swing positions.\n\nProposed Swing Trading Plan: {investment_plan}\n\nMake your swing trading decision focusing on clear entry points, swing targets, and ATR-based stop losses with proper risk management for a 2-10 day holding period. Keep final output concise (max 380 words).",
             }
 
         messages = [
@@ -251,7 +265,7 @@ USER MESSAGE:
 
 Include detailed reasoning for swing trading decisions and conclude with a clear recommendation.
 
-Focus on actionable insights with specific price levels and risk parameters."""
+Focus on actionable insights with specific price levels and risk parameters. Keep response under 360 words."""
             
             fallback_result = llm.invoke(fallback_prompt)
             analysis_content = fallback_result.content if hasattr(fallback_result, 'content') else str(fallback_result)
@@ -264,7 +278,7 @@ Focus on actionable insights with specific price levels and risk parameters."""
 Analysis:
 {analysis_content}
 
-Provide a brief justification and conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**"""
+Provide a brief justification (max 4 bullets) and conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**"""
             
             final_result = llm.invoke(final_prompt)
             final_content = final_result.content if hasattr(final_result, 'content') else str(final_result)

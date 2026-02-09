@@ -76,11 +76,34 @@ class AppState:
         self.trade_amount = 1000
         self.trade_occurred = False
 
-    def register_llm_call(self, model_name=None, purpose=None):
+    def register_llm_call(
+        self,
+        model_name=None,
+        purpose=None,
+        latency_seconds=None,
+        input_chars=None,
+        output_chars=None,
+        effort=None,
+        verbosity=None,
+        usage=None,
+        status="success",
+        error_message=None,
+    ):
         """Register an LLM call for accurate UI counting."""
         import datetime
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-        payload = {"model": model_name, "purpose": purpose}
+        payload = {
+            "model": model_name,
+            "purpose": purpose,
+            "latency_seconds": latency_seconds,
+            "input_chars": input_chars,
+            "output_chars": output_chars,
+            "effort": effort,
+            "verbosity": verbosity,
+            "usage": usage or {},
+            "status": status,
+            "error_message": error_message,
+        }
         self.llm_calls_log.append((timestamp, "LLM_CALL", payload))
         self.llm_calls_count = len([call for call in self.llm_calls_log if call[1] == "LLM_CALL"])
         self.needs_ui_update = True

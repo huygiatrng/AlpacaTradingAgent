@@ -80,7 +80,18 @@ class RunAuditLogger:
                     "llm_call_events": 0,
                     "agent_output_events": 0,
                     "node_events": 0,
+                    "tool_retry_events": 0,
                     "error_events": 0,
+                    "total_prompt_chars": 0,
+                    "total_tool_time_seconds": 0.0,
+                    "total_tool_output_chars": 0,
+                    "suspect_tool_events": 0,
+                    "total_llm_time_seconds": 0.0,
+                    "total_llm_input_chars": 0,
+                    "total_llm_output_chars": 0,
+                    "total_llm_input_tokens": 0,
+                    "total_llm_output_tokens": 0,
+                    "total_llm_tokens": 0,
                 },
             }
 
@@ -124,14 +135,44 @@ class RunAuditLogger:
 
             if event_type == "prompt":
                 run_data["summary"]["prompt_events"] += 1
+                prompt_text = (payload or {}).get("prompt_text", "")
+                run_data["summary"]["total_prompt_chars"] += len(str(prompt_text))
             elif event_type == "tool_call":
                 run_data["summary"]["tool_events"] += 1
+                tool_time = (payload or {}).get("execution_time_seconds", 0.0)
+                run_data["summary"]["total_tool_time_seconds"] += float(tool_time or 0.0)
+                output = (payload or {}).get("output", "")
+                run_data["summary"]["total_tool_output_chars"] += len(str(output or ""))
+                quality = (payload or {}).get("quality_details", {}) or {}
+                if bool(quality.get("is_suspect", False)):
+                    run_data["summary"]["suspect_tool_events"] += 1
             elif event_type == "llm_call":
                 run_data["summary"]["llm_call_events"] += 1
+                run_data["summary"]["total_llm_time_seconds"] += float(
+                    (payload or {}).get("latency_seconds", 0.0) or 0.0
+                )
+                run_data["summary"]["total_llm_input_chars"] += int(
+                    (payload or {}).get("input_chars", 0) or 0
+                )
+                run_data["summary"]["total_llm_output_chars"] += int(
+                    (payload or {}).get("output_chars", 0) or 0
+                )
+                usage = (payload or {}).get("usage", {}) or {}
+                run_data["summary"]["total_llm_input_tokens"] += int(
+                    usage.get("input_tokens", 0) or 0
+                )
+                run_data["summary"]["total_llm_output_tokens"] += int(
+                    usage.get("output_tokens", 0) or 0
+                )
+                run_data["summary"]["total_llm_tokens"] += int(
+                    usage.get("total_tokens", 0) or 0
+                )
             elif event_type == "agent_output":
                 run_data["summary"]["agent_output_events"] += 1
             elif event_type == "node_execution":
                 run_data["summary"]["node_events"] += 1
+            elif event_type == "tool_retry":
+                run_data["summary"]["tool_retry_events"] += 1
 
             if event_type in ("error", "tool_error", "node_error"):
                 run_data["summary"]["error_events"] += 1
@@ -168,6 +209,8 @@ class RunAuditLogger:
         symbol: Optional[str] = None,
         run_id: Optional[str] = None,
         error_details: Optional[Dict[str, Any]] = None,
+        quality_details: Optional[Dict[str, Any]] = None,
+        retry_count: int = 0,
     ) -> None:
         self.log_event(
             event_type="tool_call",
@@ -181,6 +224,8 @@ class RunAuditLogger:
                 "status": status,
                 "execution_time_seconds": execution_time_seconds,
                 "error_details": error_details or {},
+                "quality_details": quality_details or {},
+                "retry_count": retry_count,
             },
         )
 

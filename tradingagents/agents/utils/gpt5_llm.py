@@ -12,6 +12,7 @@ from langchain_core.outputs import ChatResult, ChatGeneration
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from openai import OpenAI
 import json
+import time
 
 
 # ============================================================================
@@ -445,9 +446,12 @@ class GPT5ChatModel(BaseChatModel):
             # gpt-5.2: reasoning.effort (none/low/medium/high/xhigh), verbosity, summary
             if reasoning_effort:
                 api_params["reasoning"] = {"effort": reasoning_effort}
+            else:
+                 api_params["reasoning"] = {}
+
             api_params["text"]["verbosity"] = self.verbosity
             if self.summary and self.summary != "null":
-                api_params["summary"] = self.summary
+                api_params["reasoning"]["summary"] = self.summary
                 
         elif model_type == "gpt-5.1":
             # gpt-5.1: reasoning.effort (none/low/medium/high), verbosity, summary
@@ -467,13 +471,78 @@ class GPT5ChatModel(BaseChatModel):
             api_params["text"]["verbosity"] = self.verbosity
         
         print(f"[GPT5] Model: {self.model} (type: {model_type}), effort: {reasoning_effort}, verbosity: {self.verbosity}")
+        input_chars = len(str(input_messages))
 
-        # Track LLM calls for UI accuracy
-        try:
-            from webui.utils.state import app_state
-            app_state.register_llm_call(model_name=self.model, purpose="gpt5_responses")
-        except Exception:
-            pass
+        def _extract_usage_dict(resp) -> Dict[str, int]:
+            usage_dict = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+            usage = getattr(resp, "usage", None)
+            if usage is None:
+                return usage_dict
+
+            if isinstance(usage, dict):
+                usage_dict["input_tokens"] = int(usage.get("input_tokens", 0) or 0)
+                usage_dict["output_tokens"] = int(usage.get("output_tokens", 0) or 0)
+                usage_dict["total_tokens"] = int(
+                    usage.get("total_tokens", usage_dict["input_tokens"] + usage_dict["output_tokens"]) or 0
+                )
+                return usage_dict
+
+            for key in ("input_tokens", "output_tokens", "total_tokens"):
+                value = getattr(usage, key, None)
+                if value is not None:
+                    usage_dict[key] = int(value or 0)
+
+            if usage_dict["total_tokens"] == 0:
+                usage_dict["total_tokens"] = usage_dict["input_tokens"] + usage_dict["output_tokens"]
+            return usage_dict
+
+        def _record_llm_call(
+            *,
+            status: str,
+            latency_seconds: float,
+            output_chars: int,
+            usage: Dict[str, int] | None = None,
+            error_message: str | None = None,
+        ) -> None:
+            payload = {
+                "model": self.model,
+                "purpose": "gpt5_responses",
+                "status": status,
+                "latency_seconds": round(float(latency_seconds), 4),
+                "input_chars": input_chars,
+                "output_chars": int(output_chars or 0),
+                "effort": reasoning_effort,
+                "verbosity": self.verbosity,
+                "usage": usage or {},
+                "error_message": error_message,
+            }
+
+            logged_to_state = False
+            try:
+                from webui.utils.state import app_state
+
+                app_state.register_llm_call(
+                    model_name=self.model,
+                    purpose="gpt5_responses",
+                    latency_seconds=payload["latency_seconds"],
+                    input_chars=payload["input_chars"],
+                    output_chars=payload["output_chars"],
+                    effort=payload["effort"],
+                    verbosity=payload["verbosity"],
+                    usage=payload["usage"],
+                    status=status,
+                    error_message=error_message,
+                )
+                logged_to_state = True
+            except Exception:
+                pass
+
+            if not logged_to_state:
+                try:
+                    from tradingagents.run_logger import get_run_audit_logger
+                    get_run_audit_logger().log_event(event_type="llm_call", payload=payload)
+                except Exception:
+                    pass
         
         # Handle tool calls if present
         tools = kwargs.get("tools", [])
@@ -519,7 +588,9 @@ class GPT5ChatModel(BaseChatModel):
         
         try:
             # Make the API call
+            call_started = time.time()
             response = self._client.responses.create(**api_params)
+            latency_seconds = time.time() - call_started
             
             # Debug: Print response structure
             if hasattr(response, 'output') and response.output:
@@ -561,6 +632,14 @@ class GPT5ChatModel(BaseChatModel):
                 print(f"[GPT5] Found {len(tool_calls)} tool calls")
                 for tc in tool_calls:
                     print(f"[GPT5]   Tool: {tc['function']['name']}")
+
+            usage_dict = _extract_usage_dict(response)
+            _record_llm_call(
+                status="success",
+                latency_seconds=latency_seconds,
+                output_chars=len(content or ""),
+                usage=usage_dict,
+            )
             
             # Create the AI message
             additional_kwargs = {}
@@ -592,6 +671,18 @@ class GPT5ChatModel(BaseChatModel):
             # Return error as content
             error_message = f"Error calling GPT-5 API: {str(e)}"
             print(f"[GPT5] {error_message}")
+            latency_seconds = 0.0
+            try:
+                latency_seconds = max(0.0, time.time() - call_started)
+            except Exception:
+                pass
+            _record_llm_call(
+                status="error",
+                latency_seconds=latency_seconds,
+                output_chars=len(error_message),
+                usage={},
+                error_message=error_message,
+            )
             ai_message = AIMessage(content=error_message)
             generation = ChatGeneration(message=ai_message)
             return ChatResult(generations=[generation])
