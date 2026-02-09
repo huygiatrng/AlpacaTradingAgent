@@ -17,16 +17,21 @@ def create_social_media_analyst(llm, toolkit):
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
         company_name = state["company_of_interest"]
+        is_crypto = "/" in ticker or "USD" in ticker.upper() or "USDT" in ticker.upper()
 
         if toolkit.config["online_tools"]:
+            reddit_tool = toolkit.get_reddit_news if is_crypto else toolkit.get_reddit_stock_info
             tools = [
                 toolkit.get_stock_news_openai,
+                reddit_tool,
             ]
         else:
-            tools = [
-                toolkit.get_reddit_stock_info,
-            ]
+            tools = [toolkit.get_reddit_news] if is_crypto else [toolkit.get_reddit_stock_info]
 
+        source_guidance = (
+            " When online tools are enabled, use both OpenAI web-search sentiment and Reddit-based social signals before concluding."
+            + (" Use `get_reddit_news(curr_date)` for crypto context." if is_crypto else " Use `get_reddit_stock_info(ticker, curr_date)` for stock context.")
+        )
         system_message = (
             "You are a SWING TRADING social media analyst specializing in identifying sentiment shifts and social catalysts that could drive multi-day price movements. "
             "Your role is to analyze social media posts, community sentiment, and social momentum indicators that affect swing trading positions (2-10 day holds).\n\n"
@@ -47,7 +52,7 @@ def create_social_media_analyst(llm, toolkit):
             "**AVOID:** Intraday noise, one-off viral spikes with no follow-through. Focus on social factors "
             "that create sustained multi-day moves relevant to swing trading.\n\n"
             "Provide comprehensive social media sentiment analysis that swing traders can use for entry/exit timing and "
-            "position sizing decisions. Always include specific social media examples and sentiment metrics when available."
+            f"position sizing decisions. Always include specific social media examples and sentiment metrics when available.{source_guidance}"
             + """ 
 
 **SWING TRADING SOCIAL SENTIMENT TABLE:**

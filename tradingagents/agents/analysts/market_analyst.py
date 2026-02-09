@@ -59,31 +59,29 @@ def create_market_analyst(llm, toolkit):
         ticker = state["company_of_interest"]
         company_name = state["company_of_interest"]
 
-        is_crypto = "/" in ticker or "USD" in ticker.upper() or "USDT" in ticker.upper()
-
-        # ── Primary tool: structured Technical Brief (Tier-1 quant output) ──
-        # The brief pre-computes indicators across 1h/4h/1d and returns a
-        # compact JSON -- the LLM no longer needs to interpret raw tables.
         if toolkit.config["online_tools"]:
-            tools = [toolkit.get_technical_brief]
-            # Keep legacy tools as optional fallbacks for edge cases
-            if is_crypto:
-                tools.append(toolkit.get_coindesk_news)
+            tools = [
+                toolkit.get_technical_brief,
+                toolkit.get_alpaca_data_report,
+                toolkit.get_stockstats_indicators_report_online,
+            ]
         else:
-            # Offline mode: fall back to legacy tools (no Alpaca live data)
             tools = [
                 toolkit.get_alpaca_data_report,
                 toolkit.get_stockstats_indicators_report,
             ]
-            if is_crypto:
-                tools.append(toolkit.get_coindesk_news)
 
         system_message = (
             """You are a **multi-timeframe technical analyst**. Your input is a structured Technical Brief (JSON) that has already been computed deterministically across three timeframes: **1 h, 4 h, and 1 d**.
 
 ## Your workflow
 
-1. **Call `get_technical_brief`** with the ticker and current date.
+1. **Use Alpaca + Stockstats tools** as your base evidence:
+   - `get_alpaca_data_report` for OHLCV context
+   - `get_stockstats_indicators_report_online` (or offline variant) for indicator values
+   - `get_technical_brief` for compact synthesized confirmation
+
+2. **Call `get_technical_brief`** with the ticker and current date.
    You will receive a JSON object with the following pre-analyzed sections for each timeframe:
    - `trend` – direction, strength (ADX), EMA slope, HH/HL, SMA 200 & distance
    - `momentum` – RSI, Stoch RSI (K/D), MACD cross
@@ -95,7 +93,7 @@ def create_market_analyst(llm, toolkit):
    - `key_levels` – Support/Resist (incl. 3M/6M highs), Pivots, Fibs
    - `signal_summary` – classified setup type and confidence
 
-2. **Analyze the brief** — look for *SWING TRADING* setups:
+3. **Analyze the brief and raw tool evidence** — look for *SWING TRADING* setups:
    - **Trend Strength**: Is ADX > 25? Are we above SMA 200 (Long-term trend)?
    - **Gap Ups**: Did price gap up (>1-2%) over a Key Level (e.g., 3-Month High)?
    - **Oversold Bounce**: Is price far below SMA 200 but reclaiming EMA 8? Stoch RSI crossing up?
@@ -103,7 +101,7 @@ def create_market_analyst(llm, toolkit):
    - **Entry Timing**: Look for Stoch RSI crossovers or pullback to EMA 8.
    - **Confluence**: Do 4h and 1d agree?
 
-3. **Produce your analysis** with these sections:
+4. **Produce your analysis** with these sections:
 
 ## Conclusion
 State **BULLISH**, **BEARISH**, or **NEUTRAL** with a 1-sentence rationale.
@@ -138,7 +136,7 @@ Conclude with: **FINAL TRANSACTION PROPOSAL: BUY/HOLD/SELL** and a brief justifi
 - Keep each section on separate lines. Do not output inline "a) ... b) ... c) ..." formatting.
 - Keep table rows on separate lines (valid markdown table syntax).
 
-**Important**: Do NOT request raw indicator tables — the Technical Brief already contains all the analysis you need in pre-digested form."""
+**Important**: Anchor your thesis in both Alpaca price action and Stockstats indicators."""
         )
 
         prompt = ChatPromptTemplate.from_messages(

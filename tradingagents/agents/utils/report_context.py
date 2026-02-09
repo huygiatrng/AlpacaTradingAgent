@@ -183,12 +183,15 @@ def _truncate(text: str, max_chars: int) -> str:
     return text[: max_chars - 3].rstrip() + "..."
 
 
-def truncate_for_prompt(text: Any, max_chars: int = 1200) -> str:
+def normalize_for_prompt(text: Any) -> str:
     """Normalize any value for prompt injection without truncation."""
-    normalized = _normalize_text(text)
-    if not normalized:
-        return ""
-    return normalized
+    return _normalize_text(text)
+
+
+def truncate_for_prompt(text: Any, max_chars: int = 1200) -> str:
+    """Backward-compatible alias for prompt normalization."""
+    _ = max_chars
+    return normalize_for_prompt(text)
 
 
 def _classify_signal(point: str) -> str:
@@ -757,7 +760,7 @@ def build_debate_digest(
     if debate_type == "investment":
         lines.append("Investment Debate Digest:")
         lines.append(f"- Turn count: {debate_state.get('count', 0)}")
-        current = truncate_for_prompt(debate_state.get("current_response", ""), msg_chars)
+        current = _truncate(normalize_for_prompt(debate_state.get("current_response", "")), msg_chars)
         if current:
             lines.append(f"- Latest response: {current}")
 
@@ -778,7 +781,7 @@ def build_debate_digest(
             ("Neutral", debate_state.get("current_neutral_response", "")),
         ]
         for label, content in latest_map:
-            compact = truncate_for_prompt(content, msg_chars)
+            compact = _truncate(normalize_for_prompt(content), msg_chars)
             if compact:
                 lines.append(f"- {label} latest: {compact}")
 

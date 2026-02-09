@@ -5,7 +5,6 @@ from ..utils.agent_trading_modes import get_trading_mode_context, get_agent_spec
 from ..utils.report_context import (
     get_agent_context_bundle,
     build_debate_digest,
-    truncate_for_prompt,
 )
 
 # Import prompt capture utility
@@ -34,7 +33,6 @@ def create_safe_debator(llm, config=None):
         # Get centralized trading mode context
         trading_context = get_trading_mode_context(config, current_position)
         agent_context = get_agent_specific_context("risk_mgmt", trading_context)
-        agent_context = truncate_for_prompt(agent_context, 1400)
         
         # Get mode-specific terms for the prompt
         actions = trading_context["actions"]
@@ -45,7 +43,7 @@ def create_safe_debator(llm, config=None):
             agent_role="safe_debator",
             objective=(
                 f"Build conservative risk argument for {state.get('company_of_interest', '')} "
-                f"from trader plan: {truncate_for_prompt(trader_decision, 700)}"
+                f"from trader plan: {trader_decision}"
             ),
             config=config,
         )

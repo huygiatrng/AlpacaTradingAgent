@@ -3,7 +3,6 @@ import json
 from ..utils.report_context import (
     get_agent_context_bundle,
     build_debate_digest,
-    truncate_for_prompt,
 )
 
 # Import prompt capture utility
@@ -45,7 +44,7 @@ Use these inputs:
 - Decision claim matrix: {claim_matrix}
 - Full untruncated analyst reports: {all_reports_text}
 - Debate digest: {debate_digest}
-- Past reflections: {truncate_for_prompt(past_memory_str, 1400)}
+- Past reflections: {past_memory_str}
 - Full debate history: {history}
 
 Output requirements:

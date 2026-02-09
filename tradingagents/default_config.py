@@ -46,6 +46,12 @@ DEFAULT_CONFIG = {
     "tool_semantic_retry_enabled": True,  # Retry web-search tool calls once on low-quality interactive/undersized output
     "tool_semantic_retry_max_retries": 1,
     "tool_semantic_retry_backoff_seconds": 0.8,
+    "global_news_fast_profile": True,  # Keep global-news tool lean even at medium/deep research depth
+    "global_news_timeout_seconds": 240,  # Timeout for get_global_news_openai web-search calls
+    "global_news_max_output_tokens": 1200,  # Applied to models that support explicit output-token caps
+    "global_news_max_events": 8,  # Cap number of events requested from global-news tool
+    "global_news_word_budget": 550,  # Target output length from global-news tool
+    "openai_store_responses": False,  # Disable response storing by default to reduce latency/payload
     # API keys (these will be overridden by environment variables if present)
     "openai_api_key": None,
     "finnhub_api_key": None,

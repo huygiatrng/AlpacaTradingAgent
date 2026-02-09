@@ -27,11 +27,17 @@ TOOL_MIN_OUTPUT_CHARS = {
 
 INTERACTIVE_FOLLOWUP_PATTERNS = (
     "would you like",
+    "if you'd like",
+    "if you would like",
+    "if you want, i can",
+    "if you want i can",
     "do you want me to",
     "i can do this, but i need",
     "should i",
     "want me to",
     "i can fetch",
+    "which follow-up",
+    "which follow up",
 )
 
 VALID_SHORT_OUTPUT_PATTERNS = (
@@ -41,21 +47,83 @@ VALID_SHORT_OUTPUT_PATTERNS = (
 )
 
 
+def _is_trailing_interactive_followup(text: str) -> bool:
+    if not text:
+        return False
+    tail = (
+        text.strip()
+        .lower()
+        .replace("’", "'")
+        .replace("‘", "'")
+        .replace("‑", "-")
+        .replace("–", "-")
+        .replace("—", "-")
+    )[-700:]
+    return any(pattern in tail for pattern in INTERACTIVE_FOLLOWUP_PATTERNS)
+
+
+def _strip_trailing_interactive_followup(text: str) -> str:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return cleaned
+
+    lines = cleaned.splitlines()
+    while lines and not lines[-1].strip():
+        lines.pop()
+
+    removed_any = False
+    while lines:
+        tail = (
+            lines[-1]
+            .strip()
+            .lower()
+            .replace("’", "'")
+            .replace("‘", "'")
+            .replace("‑", "-")
+            .replace("–", "-")
+            .replace("—", "-")
+        )
+        if any(pattern in tail for pattern in INTERACTIVE_FOLLOWUP_PATTERNS):
+            removed_any = True
+            lines.pop()
+            while lines and lines[-1].strip().startswith(("- ", "* ")):
+                lines.pop()
+            while lines and not lines[-1].strip():
+                lines.pop()
+            continue
+        break
+
+    candidate = "\n".join(lines).strip()
+    if removed_any and candidate:
+        return candidate
+    return cleaned
+
+
 def _score_output_quality(tool_name: str, output: object) -> dict:
     text = str(output or "").strip()
-    lower = text.lower()
+    lower = (
+        text.lower()
+        .replace("’", "'")
+        .replace("‘", "'")
+        .replace("‑", "-")
+        .replace("–", "-")
+        .replace("—", "-")
+    )
     flags = []
+    min_chars = TOOL_MIN_OUTPUT_CHARS.get(tool_name, 0)
+    trailing_interactive = _is_trailing_interactive_followup(text)
 
     if not text:
         flags.append("empty_output")
 
     if any(pattern in lower for pattern in INTERACTIVE_FOLLOWUP_PATTERNS):
-        flags.append("interactive_followup")
+        substantial_output = len(text) >= max(1200, min_chars * 2)
+        if not (trailing_interactive and substantial_output):
+            flags.append("interactive_followup")
 
     if lower.startswith("error:") or lower.startswith("exception:"):
         flags.append("error_prefixed_output")
 
-    min_chars = TOOL_MIN_OUTPUT_CHARS.get(tool_name, 0)
     if min_chars and len(text) < min_chars:
         if not any(pattern in lower for pattern in VALID_SHORT_OUTPUT_PATTERNS):
             flags.append("undersized_output")
@@ -83,6 +151,7 @@ def _score_output_quality(tool_name: str, output: object) -> dict:
         "retry_recommended": retry_recommended,
         "output_chars": len(text),
         "output_preview": text[:220],
+        "trailing_interactive_followup": trailing_interactive,
     }
 
 
@@ -215,6 +284,11 @@ def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
                     if partial_elapsed > 120:
                         print(f"[{analyst_type}] ⚠️ Slow execution warning: {tool_name} took {partial_elapsed:.1f}s")
 
+                    if isinstance(result, str):
+                        sanitized_result = _strip_trailing_interactive_followup(result)
+                        if sanitized_result != result:
+                            result = sanitized_result
+
                     quality = _score_output_quality(tool_name, result)
                     if not first_quality:
                         first_quality = quality
@@ -236,6 +310,15 @@ def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
                         and retry_count < max_semantic_retries
                         and quality.get("retry_recommended", False)
                     )
+                    # Avoid expensive second global-news web search when the first result
+                    # is already substantive, even if it ends with an interactive tail.
+                    if (
+                        should_retry
+                        and tool_name == "get_global_news_openai"
+                        and quality.get("output_chars", 0)
+                        >= TOOL_MIN_OUTPUT_CHARS.get(tool_name, 0)
+                    ):
+                        should_retry = False
                     if not should_retry:
                         quality_details = quality
                         break
@@ -426,6 +509,33 @@ class Toolkit:
         global_news_result = interface.get_reddit_global_news(curr_date, 7, 5)
 
         return global_news_result
+
+    @staticmethod
+    @tool
+    @timing_wrapper("NEWS")
+    def get_finnhub_news_recent(
+        ticker: Annotated[
+            str,
+            "Search query of a company, e.g. 'AAPL, TSM, NVDA'",
+        ],
+        curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
+        look_back_days: Annotated[int, "How many days to look back"] = 7,
+    ):
+        """
+        Retrieve recent company news from Finnhub over a lookback window.
+        Args:
+            ticker (str): Company ticker symbol
+            curr_date (str): Current date in yyyy-mm-dd format
+            look_back_days (int): Days to look back from curr_date
+        Returns:
+            str: Formatted Finnhub news report
+        """
+
+        finnhub_news_result = interface.get_finnhub_news(
+            ticker, curr_date, look_back_days
+        )
+
+        return finnhub_news_result
 
     @staticmethod
     @tool
@@ -925,6 +1035,29 @@ class Toolkit:
         )
         
         return macro_analysis_results
+
+    @staticmethod
+    @tool
+    @timing_wrapper("MACRO", uses_web_search=True)
+    def get_macro_news_openai(
+        curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
+        ticker_context: Annotated[
+            str,
+            "Optional context for macro web search (e.g. NVDA, BTC/USD, or 'financial markets')",
+        ] = "financial markets",
+    ) -> str:
+        """
+        Retrieve macro-relevant global news using OpenAI web search.
+
+        Args:
+            curr_date (str): Current date in yyyy-mm-dd format
+            ticker_context (str): Context string for relevance filtering
+
+        Returns:
+            str: Macro/global-news analysis grounded in web search.
+        """
+
+        return interface.get_global_news_openai(curr_date, ticker_context)
 
     @staticmethod
     @tool

@@ -29,17 +29,23 @@ def create_macro_analyst(llm, toolkit):
                 tools = [
                     toolkit.get_macro_analysis,
                     toolkit.get_economic_indicators,
-                    toolkit.get_yield_curve_analysis
+                    toolkit.get_yield_curve_analysis,
+                    toolkit.get_macro_news_openai,
                 ]
-                # print(f"[MACRO] Using online macro tools: FRED API + Economic Indicators")
+                # print(f"[MACRO] Using online macro tools: FRED API + OpenAI web search")
             else:
                 # For offline mode, we still use the same tools but they may use cached data
                 tools = [
                     toolkit.get_macro_analysis,
                     toolkit.get_economic_indicators,
-                    toolkit.get_yield_curve_analysis
+                    toolkit.get_yield_curve_analysis,
                 ]
                 # print(f"[MACRO] Using offline macro tools: Cached Economic Data")
+
+            source_guidance = (
+                " When online tools are enabled, combine FRED-based macro data tools and OpenAI web-search macro news before concluding."
+                f" Use `get_macro_news_openai(curr_date, ticker_context='{ticker}')` for relevance."
+            )
 
             system_message = (
                 "You are a SWING TRADING macro analyst focused on identifying macroeconomic factors and events that could drive multi-day market movements within a 2-10 day swing horizon. "
@@ -61,6 +67,7 @@ def create_macro_analyst(llm, toolkit):
                 "**AVOID:** Very long-term economic forecasts, annual outlooks. Focus on actionable macro insights "
                 "for swing traders covering the 2-10 day horizon, with specific dates, expected reactions, and sector implications. "
                 "Provide timing-specific macro analysis that swing traders can use to manage positions through economic events.\n\n"
+                + source_guidance + "\n\n"
                 "Make sure to append a Markdown table organizing:\n"
                 "| Date/Time | Economic Event | Expected Impact | Affected Sectors | Swing Trade Implication |\n"
                 "|-----------|----------------|-----------------|------------------|------------------------|\n"
@@ -79,6 +86,7 @@ def create_macro_analyst(llm, toolkit):
                         " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
                         " You have access to the following tools: {tool_names}.\n{system_message}"
                         "For your reference, the current date is {current_date}. "
+                        "Asset context is {ticker}. "
                         "Focus on macroeconomic conditions that affect overall market sentiment and sector rotation. "
                         "If tools fail due to missing API keys, provide a general macro analysis based on current market knowledge.",
                     ),
@@ -90,6 +98,7 @@ def create_macro_analyst(llm, toolkit):
             prompt = prompt.partial(system_message=system_message)
             prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
             prompt = prompt.partial(current_date=current_date)
+            prompt = prompt.partial(ticker=ticker)
 
             # Capture the COMPLETE resolved prompt that gets sent to the LLM
             try:

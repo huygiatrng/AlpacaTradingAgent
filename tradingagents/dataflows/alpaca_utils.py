@@ -36,6 +36,7 @@ ticker_to_company_fallback = {
     "NFLX": "Netflix",
     "CRM": "Salesforce",
     "PYPL": "PayPal",
+    "VZ": "Verizon OR Verizon Communications",
     "PLTR": "Palantir",
     "MU": "Micron",
     "SQ": "Block OR Square",

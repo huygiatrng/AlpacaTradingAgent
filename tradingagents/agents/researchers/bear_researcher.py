@@ -4,7 +4,6 @@ import json
 from ..utils.report_context import (
     get_agent_context_bundle,
     build_debate_digest,
-    truncate_for_prompt,
 )
 
 # Import prompt capture utility
@@ -28,7 +27,7 @@ def create_bear_researcher(llm, memory):
             agent_role="bear_researcher",
             objective=(
                 f"Build a bearish thesis for {state.get('company_of_interest', '')}. "
-                f"Counter the latest bull argument: {truncate_for_prompt(current_response, 700)}"
+                f"Counter the latest bull argument: {current_response}"
             ),
         )
         claim_matrix = context_bundle.get("decision_claim_matrix", "")

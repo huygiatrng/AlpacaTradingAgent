@@ -43,28 +43,37 @@ def create_fundamentals_analyst(llm, toolkit):
                 if is_crypto:
                     tools = [
                         toolkit.get_defillama_fundamentals,
-                        toolkit.get_earnings_calendar  # For crypto events/announcements
+                        toolkit.get_fundamentals_openai,
                     ]
-                    # print(f"[FUNDAMENTALS] Using online crypto tools: DeFiLlama + Events Calendar")
+                    # print(f"[FUNDAMENTALS] Using online crypto tools: DeFiLlama + OpenAI fundamentals")
                 else:
                     tools = [
                         toolkit.get_fundamentals_openai,
-                        toolkit.get_earnings_calendar,
-                        toolkit.get_earnings_surprise_analysis,
+                        toolkit.get_finnhub_company_insider_sentiment,
+                        toolkit.get_finnhub_company_insider_transactions,
+                        toolkit.get_simfin_balance_sheet,
+                        toolkit.get_simfin_cashflow,
+                        toolkit.get_simfin_income_stmt,
                     ]
-                    # print(f"[FUNDAMENTALS] Using online stock tools: OpenAI Fundamentals + Earnings Analysis")
+                    # print(f"[FUNDAMENTALS] Using online stock tools: OpenAI + Finnhub + SimFin")
             else:
-                tools = [
-                    toolkit.get_finnhub_company_insider_sentiment,
-                    toolkit.get_finnhub_company_insider_transactions,
-                    toolkit.get_simfin_balance_sheet,
-                    toolkit.get_simfin_cashflow,
-                    toolkit.get_simfin_income_stmt,
-                    toolkit.get_earnings_calendar,
-                    toolkit.get_earnings_surprise_analysis
-                ]
-                # print(f"[FUNDAMENTALS] Using offline tools: Finnhub + SimFin + Earnings Analysis")
+                if is_crypto:
+                    tools = [toolkit.get_defillama_fundamentals]
+                else:
+                    tools = [
+                        toolkit.get_finnhub_company_insider_sentiment,
+                        toolkit.get_finnhub_company_insider_transactions,
+                        toolkit.get_simfin_balance_sheet,
+                        toolkit.get_simfin_cashflow,
+                        toolkit.get_simfin_income_stmt,
+                    ]
+                # print(f"[FUNDAMENTALS] Using offline tools: Finnhub + SimFin (stock) or DeFiLlama (crypto)")
 
+            source_guidance = (
+                " When online tools are enabled, combine OpenAI web-search fundamentals with structured data tools before concluding."
+                " For stocks, use OpenAI + Finnhub + SimFin."
+                " For crypto, use OpenAI + DeFiLlama."
+            )
             system_message = (
                 "You are a SWING TRADING fundamentals analyst focused on identifying fundamental catalysts and factors that could drive multi-day price movements (2-10 day swing horizon). "
                 + ("Analyze DeFi metrics like TVL changes, protocol upgrades, token unlock schedules, yield farming opportunities, and major partnership announcements that could sustain multi-day crypto price trends. " if is_crypto else "Focus on earnings surprises, analyst upgrades/downgrades, insider activity, and fundamental shifts that could sustain multi-day swing moves. ")
@@ -84,7 +93,7 @@ def create_fundamentals_analyst(llm, toolkit):
                 + "- Consider both positive and negative fundamental drivers over the swing period \n"
                 + "- Focus on actionable insights for swing trade entries and exits \n"
                 + "- Avoid long-term valuation metrics unless they create catalysts during the swing window \n"
-                + "Provide detailed, actionable fundamental analysis that swing traders can use to time entries and exits around multi-day catalysts."
+                + f"Provide detailed, actionable fundamental analysis that swing traders can use to time entries and exits around multi-day catalysts.{source_guidance}"
                 + " Make sure to append a Markdown table at the end organizing key events, dates, and potential price impact for swing trading decisions."
             )
 

@@ -152,18 +152,15 @@ class TradingAgentsGraph:
                     # offline tools
                     self.toolkit.get_stockstats_indicators_report,
                     self.toolkit.get_alpaca_data_report,
-                    # crypto
-                    self.toolkit.get_coindesk_news,
                 ]
             ),
             "social": ToolNode(
                 [
                     # online tools
                     self.toolkit.get_stock_news_openai,
-                    # offline tools
+                    # direct social tools
                     self.toolkit.get_reddit_stock_info,
-                    # crypto
-                    self.toolkit.get_coindesk_news,
+                    self.toolkit.get_reddit_news,
                 ]
             ),
             "news": ToolNode(
@@ -171,10 +168,7 @@ class TradingAgentsGraph:
                     # online tools
                     self.toolkit.get_global_news_openai,
                     self.toolkit.get_google_news,
-                    # offline tools
-                    self.toolkit.get_finnhub_news,
-                    self.toolkit.get_reddit_news,
-                    # crypto
+                    self.toolkit.get_finnhub_news_recent,
                     self.toolkit.get_coindesk_news,
                 ]
             ),
@@ -183,15 +177,12 @@ class TradingAgentsGraph:
                     # online tools
                     self.toolkit.get_fundamentals_openai,
                     self.toolkit.get_defillama_fundamentals,
-                    # offline tools
+                    # direct data tools
                     self.toolkit.get_finnhub_company_insider_sentiment,
                     self.toolkit.get_finnhub_company_insider_transactions,
                     self.toolkit.get_simfin_balance_sheet,
                     self.toolkit.get_simfin_cashflow,
                     self.toolkit.get_simfin_income_stmt,
-                    # earnings tools
-                    self.toolkit.get_earnings_calendar,
-                    self.toolkit.get_earnings_surprise_analysis,
                 ]
             ),
             "macro": ToolNode(
@@ -200,6 +191,7 @@ class TradingAgentsGraph:
                     self.toolkit.get_macro_analysis,
                     self.toolkit.get_economic_indicators,
                     self.toolkit.get_yield_curve_analysis,
+                    self.toolkit.get_macro_news_openai,
                 ]
             ),
         }

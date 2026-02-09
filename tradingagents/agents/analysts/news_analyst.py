@@ -20,21 +20,36 @@ def create_news_analyst(llm, toolkit):
         is_crypto = "/" in ticker or "USD" in ticker.upper() or "USDT" in ticker.upper()
 
         if toolkit.config["online_tools"]:
-            tools = [toolkit.get_global_news_openai, toolkit.get_google_news]
-        else:
             if is_crypto:
                 tools = [
-                    toolkit.get_coindesk_news,
-                    toolkit.get_reddit_news,
+                    toolkit.get_global_news_openai,
                     toolkit.get_google_news,
+                    toolkit.get_coindesk_news,
                 ]
             else:
                 tools = [
-                    toolkit.get_finnhub_news,
-                    toolkit.get_reddit_news,
+                    toolkit.get_global_news_openai,
                     toolkit.get_google_news,
+                    toolkit.get_finnhub_news_recent,
+                ]
+        else:
+            if is_crypto:
+                tools = [
+                    toolkit.get_google_news,
+                    toolkit.get_coindesk_news,
+                ]
+            else:
+                tools = [
+                    toolkit.get_google_news,
+                    toolkit.get_finnhub_news_recent,
                 ]
 
+        source_guidance = (
+            " When online tools are enabled, call both OpenAI web search and direct news sources before concluding."
+            " For stocks: use `get_global_news_openai` + `get_google_news` + `get_finnhub_news_recent`."
+            " For crypto: use `get_global_news_openai` + `get_google_news` + `get_coindesk_news`."
+            " For `get_finnhub_news_recent`, pass ticker and curr_date from context."
+        )
         system_message = (
             f"You are a SWING TRADING news analyst specializing in identifying news events and market developments that could drive multi-day price movements for {ticker}. Focus on catalysts and sentiment shifts that affect swing trading positions (2-10 day holds)."
             + " **SWING TRADING NEWS ANALYSIS:** \n"
@@ -51,6 +66,7 @@ def create_news_analyst(llm, toolkit):
             + "- Consider news durability (will impact persist through the swing period?) \n"
             + "- Analyze market reaction patterns to similar news for multi-day follow-through \n"
             + f"**IMPORTANT:** When using get_global_news_openai, ALWAYS pass ticker_context='{ticker}' to get {('crypto-relevant global news (regulation, institutional adoption, DeFi developments)' if is_crypto else 'sector-relevant global news')} instead of generic macro news.\n"
+            + f"{source_guidance}\n"
             + "**AVOID:** Generic market commentary, intraday noise. Focus on news with multi-day impact potential relevant to swing trades.\n"
             + """ Make sure to append a Markdown table at the end organizing:
 | News Event | Date/Time | Impact Level | Price Direction | Swing Trading Implication |

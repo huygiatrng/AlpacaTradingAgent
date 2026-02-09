@@ -9,7 +9,6 @@ from ..utils.agent_trading_modes import (
 from ..utils.report_context import (
     get_agent_context_bundle,
     build_debate_digest,
-    truncate_for_prompt,
 )
 from tradingagents.dataflows.alpaca_utils import AlpacaUtils
 
@@ -90,7 +89,6 @@ def create_risk_manager(llm, memory, config=None):
         # Get centralized trading mode context
         trading_context = get_trading_mode_context(config, current_position)
         agent_context = get_agent_specific_context("manager", trading_context)
-        agent_context = truncate_for_prompt(agent_context, 1600)
         
         # Get mode-specific terms for the prompt
         actions = trading_context["actions"]
@@ -102,7 +100,7 @@ def create_risk_manager(llm, memory, config=None):
             agent_role="risk_manager",
             objective=(
                 f"Judge risk debate and finalize risk-adjusted trade decision for {company_name}. "
-                f"Trader plan: {truncate_for_prompt(trader_plan, 700)}"
+                f"Trader plan: {trader_plan}"
             ),
             config=config,
         )
@@ -130,7 +128,7 @@ Inputs:
 - Full untruncated analyst reports: {all_reports_text}
 - Risk debate digest: {risk_debate_digest}
 - Full risk debate history: {history}
-- Past lessons: {truncate_for_prompt(past_memory_str, 1200)}
+- Past lessons: {past_memory_str}
 
 Decision constraints:
 1. Reject proposals implying >3% account risk or unclear exits.

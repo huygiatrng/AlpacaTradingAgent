@@ -5,7 +5,6 @@ from ..utils.agent_trading_modes import get_trading_mode_context, get_agent_spec
 from ..utils.report_context import (
     get_agent_context_bundle,
     build_debate_digest,
-    truncate_for_prompt,
 )
 from tradingagents.dataflows.alpaca_utils import AlpacaUtils
 
@@ -81,7 +80,6 @@ def create_trader(llm, memory, config=None):
         # Get centralized trading mode context
         trading_context = get_trading_mode_context(config, current_position)
         agent_context = get_agent_specific_context("trader", trading_context)
-        agent_context = truncate_for_prompt(agent_context, 1600)
         
         # Get mode-specific terms for the prompt
         actions = trading_context["actions"]
@@ -94,7 +92,7 @@ def create_trader(llm, memory, config=None):
             agent_role="trader",
             objective=(
                 f"Prepare a swing trading plan for {company_name}. "
-                f"Current trader plan draft: {truncate_for_prompt(investment_plan, 700)}"
+                f"Current trader plan draft: {investment_plan}"
             ),
             config=config,
         )

@@ -1,8 +1,17 @@
 from typing import Annotated, Dict
-from .reddit_utils import fetch_top_from_category
+from .reddit_utils import (
+    fetch_top_from_category,
+    fetch_top_from_category_online,
+    get_search_terms,
+)
 from .stockstats_utils import *
 from .googlenews_utils import *
-from .finnhub_utils import get_data_in_range
+from .finnhub_utils import (
+    get_data_in_range,
+    fetch_company_news_live,
+    fetch_insider_sentiment_live,
+    fetch_insider_transactions_live,
+)
 from .alpaca_utils import AlpacaUtils
 from .coindesk_utils import get_news as get_coindesk_news_util
 from .defillama_utils import get_fundamentals as get_defillama_fundamentals_util
@@ -14,103 +23,16 @@ from datetime import datetime
 import json
 import os
 import pandas as pd
-from tqdm import tqdm
-from openai import OpenAI
-import httpx
 from .config import get_config, set_config, DATA_DIR, get_api_key
-
-
-def get_openai_client_with_timeout(api_key, timeout_seconds=300):
-    """Create OpenAI client with configurable timeout for slow web search operations."""
-    return OpenAI(
-        api_key=api_key,
-        timeout=httpx.Timeout(timeout_seconds, connect=10.0)
-    )
-
-
-def get_search_context_for_depth(research_depth=None):
-    """Get the appropriate search_context_size based on research depth.
-    
-    Args:
-        research_depth: "Shallow", "Medium", or "Deep" (or None for default)
-    
-    Returns:
-        str: "low", "medium", or "high" for web search context size
-    
-    Research Depth Mapping:
-        - Shallow: "low" - Faster, less comprehensive (5-10 sources)
-        - Medium: "medium" - Balanced (10-20 sources)
-        - Deep: "high" - Most comprehensive, slowest (20+ sources)
-    """
-    if research_depth is None:
-        config = get_config()
-        research_depth = config.get("research_depth", "Medium")
-    
-    depth_mapping = {
-        "shallow": "low",
-        "medium": "medium", 
-        "deep": "high"
-    }
-    
-    return depth_mapping.get(research_depth.lower() if research_depth else "medium", "medium")
-
-
-def get_llm_params_for_depth(research_depth=None):
-    """Get reasoning effort and verbosity matching the research depth.
-
-    Returns:
-        dict with keys ``effort`` and ``verbosity`` (both str).
-    """
-    if research_depth is None:
-        config = get_config()
-        research_depth = config.get("research_depth", "Medium")
-
-    depth = research_depth.lower() if research_depth else "medium"
-    mapping = {
-        "shallow": {"effort": "low",    "verbosity": "low"},
-        "medium":  {"effort": "medium",  "verbosity": "medium"},
-        "deep":    {"effort": "high",    "verbosity": "high"},
-    }
-    return mapping.get(depth, mapping["medium"])
-
-
-def get_model_params(model_name, max_tokens_value=3000):
-    """Get appropriate parameters for different model types."""
-    params = {}
-    
-    # GPT-5 and GPT-4.1 models use the responses.create() API 
-    # Older models use the standard chat.completions.create() API
-    gpt5_models = ["gpt-5", "gpt-5-mini", "gpt-5-nano"]
-    gpt52_models = ["gpt-5.2", "gpt-5.2-pro"]
-    gpt41_models = ["gpt-4.1"]
-    
-    if any(model_prefix in model_name for model_prefix in gpt52_models):
-        # GPT-5.2 models: use responses.create() API with specific parameters
-        params["text"] = {"format": "text"}
-        params["summary"] = "auto"
-        
-        if "gpt-5.2-pro" in model_name:
-            # GPT-5.2-pro specific: store responses for fine-tuning
-            params["store"] = True
-        else:
-            # GPT-5.2 specific: effort and verbosity controls
-            params["reasoning"] = {"effort": "medium"}
-            params["verbosity"] = "medium"
-    elif any(model_prefix in model_name for model_prefix in gpt5_models):
-        # GPT-5 models: use responses.create() API with no token parameters
-        # Token limits are handled by the model automatically
-        pass  # No additional parameters needed for GPT-5
-    elif any(model_prefix in model_name for model_prefix in gpt41_models):
-        # GPT-4.1 models: use responses.create() API with specific parameters
-        params["temperature"] = 0.2
-        params["max_output_tokens"] = max_tokens_value
-        params["top_p"] = 1
-    else:
-        # Standard models (GPT-4, etc.)
-        params["temperature"] = 0.2
-        params["max_tokens"] = max_tokens_value
-    
-    return params
+from .interface_utils import (
+    _coerce_bool,
+    _strip_trailing_interactive_followup,
+    get_global_news_profile_for_depth,
+    get_llm_params_for_depth,
+    get_model_params,
+    get_openai_client_with_timeout,
+    get_search_context_for_depth,
+)
 
 
 def get_finnhub_news(
@@ -137,22 +59,50 @@ def get_finnhub_news(
     before = start_date - relativedelta(days=look_back_days)
     before = before.strftime("%Y-%m-%d")
 
-    result = get_data_in_range(ticker, before, curr_date, "news_data", DATA_DIR)
-
-    if len(result) == 0:
-        return ""
-
+    online_tools_enabled = _coerce_bool(get_config().get("online_tools", True))
     combined_result = ""
-    for day, data in result.items():
-        if len(data) == 0:
+    source_label = "cache"
+
+    # Cache-first path
+    try:
+        result = get_data_in_range(ticker, before, curr_date, "news_data", DATA_DIR)
+    except FileNotFoundError:
+        result = {}
+
+    for day, data in (result or {}).items():
+        if not data:
             continue
         for entry in data:
-            current_news = (
-                "### " + entry["headline"] + f" ({day})" + "\n" + entry["summary"]
-            )
+            headline = entry.get("headline", "Untitled")
+            summary = entry.get("summary", "")
+            current_news = f"### {headline} ({day})\n{summary}"
             combined_result += current_news + "\n\n"
 
-    return f"## {ticker} News, from {before} to {curr_date}:\n" + str(combined_result)
+    # Live Finnhub API fallback when cache is missing/empty
+    if not combined_result and online_tools_enabled:
+        try:
+            live_entries = fetch_company_news_live(ticker, before, curr_date)
+            source_label = "finnhub_live_api"
+        except Exception:
+            live_entries = []
+
+        for entry in live_entries:
+            ts = entry.get("datetime", 0)
+            if isinstance(ts, (int, float)) and ts > 0:
+                day = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
+            else:
+                day = entry.get("date", curr_date)
+            headline = entry.get("headline", "Untitled")
+            summary = entry.get("summary") or entry.get("url") or ""
+            combined_result += f"### {headline} ({day})\n{summary}\n\n"
+
+    if not combined_result:
+        return f"## {ticker} News, from {before} to {curr_date}: No Finnhub news items found."
+
+    return (
+        f"## {ticker} News, from {before} to {curr_date} (source: {source_label}):\n"
+        + str(combined_result)
+    )
 
 
 def get_finnhub_company_insider_sentiment(
@@ -176,23 +126,62 @@ def get_finnhub_company_insider_sentiment(
     before = date_obj - relativedelta(days=look_back_days)
     before = before.strftime("%Y-%m-%d")
 
-    data = get_data_in_range(ticker, before, curr_date, "insider_senti", DATA_DIR)
+    online_tools_enabled = _coerce_bool(get_config().get("online_tools", True))
+    source_label = "cache"
+    seen_records = set()
+    result_lines = []
 
-    if len(data) == 0:
-        return ""
+    try:
+        data = get_data_in_range(ticker, before, curr_date, "insider_senti", DATA_DIR)
+    except FileNotFoundError:
+        data = {}
 
-    result_str = ""
-    seen_dicts = []
-    for date, senti_list in data.items():
+    for _, senti_list in (data or {}).items():
         for entry in senti_list:
-            if entry not in seen_dicts:
-                result_str += f"### {entry['year']}-{entry['month']}:\nChange: {entry['change']}\nMonthly Share Purchase Ratio: {entry['mspr']}\n\n"
-                seen_dicts.append(entry)
+            year = entry.get("year")
+            month = entry.get("month")
+            change = entry.get("change")
+            mspr = entry.get("mspr")
+            rec_key = (year, month, change, mspr)
+            if rec_key in seen_records:
+                continue
+            seen_records.add(rec_key)
+            result_lines.append(
+                f"### {year}-{month}:\n"
+                f"Change: {change}\n"
+                f"Monthly Share Purchase Ratio: {mspr}\n"
+            )
+
+    if not result_lines and online_tools_enabled:
+        try:
+            live_entries = fetch_insider_sentiment_live(ticker, before, curr_date)
+            source_label = "finnhub_live_api"
+        except Exception:
+            live_entries = []
+
+        for entry in live_entries:
+            year = entry.get("year")
+            month = entry.get("month")
+            change = entry.get("change")
+            mspr = entry.get("mspr")
+            rec_key = (year, month, change, mspr)
+            if rec_key in seen_records:
+                continue
+            seen_records.add(rec_key)
+            result_lines.append(
+                f"### {year}-{month}:\n"
+                f"Change: {change}\n"
+                f"Monthly Share Purchase Ratio: {mspr}\n"
+            )
+
+    if not result_lines:
+        return f"## {ticker} Insider Sentiment Data for {before} to {curr_date}: No records found."
 
     return (
-        f"## {ticker} Insider Sentiment Data for {before} to {curr_date}:\n"
-        + result_str
-        + "The change field refers to the net buying/selling from all insiders' transactions. The mspr field refers to monthly share purchase ratio."
+        f"## {ticker} Insider Sentiment Data for {before} to {curr_date} (source: {source_label}):\n"
+        + "\n".join(result_lines)
+        + "\nThe change field refers to net insider buying/selling. "
+        "The mspr field is the monthly share purchase ratio."
     )
 
 
@@ -217,24 +206,86 @@ def get_finnhub_company_insider_transactions(
     before = date_obj - relativedelta(days=look_back_days)
     before = before.strftime("%Y-%m-%d")
 
-    data = get_data_in_range(ticker, before, curr_date, "insider_trans", DATA_DIR)
+    online_tools_enabled = _coerce_bool(get_config().get("online_tools", True))
+    source_label = "cache"
+    seen_records = set()
+    result_lines = []
 
-    if len(data) == 0:
-        return ""
+    try:
+        data = get_data_in_range(ticker, before, curr_date, "insider_trans", DATA_DIR)
+    except FileNotFoundError:
+        data = {}
 
-    result_str = ""
-
-    seen_dicts = []
-    for date, senti_list in data.items():
+    for _, senti_list in (data or {}).items():
         for entry in senti_list:
-            if entry not in seen_dicts:
-                result_str += f"### Filing Date: {entry['filingDate']}, {entry['name']}:\nChange:{entry['change']}\nShares: {entry['share']}\nTransaction Price: {entry['transactionPrice']}\nTransaction Code: {entry['transactionCode']}\n\n"
-                seen_dicts.append(entry)
+            filing_date = entry.get("filingDate", "N/A")
+            name = entry.get("name", "Unknown Insider")
+            change = entry.get("change", "N/A")
+            shares = entry.get("share", "N/A")
+            transaction_price = entry.get("transactionPrice", "N/A")
+            transaction_code = entry.get("transactionCode", "N/A")
+            rec_key = (
+                filing_date,
+                name,
+                entry.get("transactionDate", ""),
+                change,
+                shares,
+                transaction_price,
+                transaction_code,
+            )
+            if rec_key in seen_records:
+                continue
+            seen_records.add(rec_key)
+            result_lines.append(
+                f"### Filing Date: {filing_date}, {name}:\n"
+                f"Change: {change}\n"
+                f"Shares: {shares}\n"
+                f"Transaction Price: {transaction_price}\n"
+                f"Transaction Code: {transaction_code}\n"
+            )
+
+    if not result_lines and online_tools_enabled:
+        try:
+            live_entries = fetch_insider_transactions_live(ticker, before, curr_date)
+            source_label = "finnhub_live_api"
+        except Exception:
+            live_entries = []
+
+        for entry in live_entries:
+            filing_date = entry.get("filingDate", "N/A")
+            name = entry.get("name", "Unknown Insider")
+            change = entry.get("change", "N/A")
+            shares = entry.get("share", "N/A")
+            transaction_price = entry.get("transactionPrice", "N/A")
+            transaction_code = entry.get("transactionCode", "N/A")
+            rec_key = (
+                filing_date,
+                name,
+                entry.get("transactionDate", ""),
+                change,
+                shares,
+                transaction_price,
+                transaction_code,
+            )
+            if rec_key in seen_records:
+                continue
+            seen_records.add(rec_key)
+            result_lines.append(
+                f"### Filing Date: {filing_date}, {name}:\n"
+                f"Change: {change}\n"
+                f"Shares: {shares}\n"
+                f"Transaction Price: {transaction_price}\n"
+                f"Transaction Code: {transaction_code}\n"
+            )
+
+    if not result_lines:
+        return f"## {ticker} insider transactions from {before} to {curr_date}: No records found."
 
     return (
-        f"## {ticker} insider transactions from {before} to {curr_date}:\n"
-        + result_str
-        + "The change field reflects the variation in share count—here a negative number indicates a reduction in holdings—while share specifies the total number of shares involved. The transactionPrice denotes the per-share price at which the trade was executed, and transactionDate marks when the transaction occurred. The name field identifies the insider making the trade, and transactionCode (e.g., S for sale) clarifies the nature of the transaction. FilingDate records when the transaction was officially reported, and the unique id links to the specific SEC filing, as indicated by the source. Additionally, the symbol ties the transaction to a particular company, isDerivative flags whether the trade involves derivative securities, and currency notes the currency context of the transaction."
+        f"## {ticker} insider transactions from {before} to {curr_date} (source: {source_label}):\n"
+        + "\n".join(result_lines)
+        + "\nThe change field reflects variation in insider holdings; share is volume; "
+        "transactionPrice is execution price per share; transactionCode describes trade type."
     )
 
 
@@ -280,28 +331,27 @@ def get_simfin_balance_sheet(
         "us",
         f"us-balance-{freq}.csv",
     )
-    df = pd.read_csv(data_path, sep=";")
 
-    # Convert date strings to datetime objects and remove any time components
+    if not os.path.exists(data_path):
+        return (
+            f"## {freq} balance sheet for {ticker}: unavailable "
+            f"(SimFin file missing: {data_path})."
+        )
+
+    df = pd.read_csv(data_path, sep=";")
     df["Report Date"] = pd.to_datetime(df["Report Date"], utc=True).dt.normalize()
     df["Publish Date"] = pd.to_datetime(df["Publish Date"], utc=True).dt.normalize()
-
-    # Convert the current date to datetime and normalize
     curr_date_dt = pd.to_datetime(curr_date, utc=True).normalize()
-
-    # Filter the DataFrame for the given ticker and for reports that were published on or before the current date
     filtered_df = df[(df["Ticker"] == ticker) & (df["Publish Date"] <= curr_date_dt)]
 
-    # Check if there are any available reports; if not, return a notification
     if filtered_df.empty:
-        print("No balance sheet available before the given current date.")
-        return ""
+        return (
+            f"## {freq} balance sheet for {ticker}: no SimFin report available before {curr_date}."
+        )
 
-    # Get the most recent balance sheet by selecting the row with the latest Publish Date
     latest_balance_sheet = filtered_df.loc[filtered_df["Publish Date"].idxmax()]
-
-    # drop the SimFinID column
-    latest_balance_sheet = latest_balance_sheet.drop("SimFinId")
+    if "SimFinId" in latest_balance_sheet.index:
+        latest_balance_sheet = latest_balance_sheet.drop("SimFinId")
 
     return (
         f"## {freq} balance sheet for {ticker} released on {str(latest_balance_sheet['Publish Date'])[0:10]}: \n"
@@ -327,28 +377,27 @@ def get_simfin_cashflow(
         "us",
         f"us-cashflow-{freq}.csv",
     )
-    df = pd.read_csv(data_path, sep=";")
 
-    # Convert date strings to datetime objects and remove any time components
+    if not os.path.exists(data_path):
+        return (
+            f"## {freq} cash flow statement for {ticker}: unavailable "
+            f"(SimFin file missing: {data_path})."
+        )
+
+    df = pd.read_csv(data_path, sep=";")
     df["Report Date"] = pd.to_datetime(df["Report Date"], utc=True).dt.normalize()
     df["Publish Date"] = pd.to_datetime(df["Publish Date"], utc=True).dt.normalize()
-
-    # Convert the current date to datetime and normalize
     curr_date_dt = pd.to_datetime(curr_date, utc=True).normalize()
-
-    # Filter the DataFrame for the given ticker and for reports that were published on or before the current date
     filtered_df = df[(df["Ticker"] == ticker) & (df["Publish Date"] <= curr_date_dt)]
 
-    # Check if there are any available reports; if not, return a notification
     if filtered_df.empty:
-        print("No cash flow statement available before the given current date.")
-        return ""
+        return (
+            f"## {freq} cash flow statement for {ticker}: no SimFin report available before {curr_date}."
+        )
 
-    # Get the most recent cash flow statement by selecting the row with the latest Publish Date
     latest_cash_flow = filtered_df.loc[filtered_df["Publish Date"].idxmax()]
-
-    # drop the SimFinID column
-    latest_cash_flow = latest_cash_flow.drop("SimFinId")
+    if "SimFinId" in latest_cash_flow.index:
+        latest_cash_flow = latest_cash_flow.drop("SimFinId")
 
     return (
         f"## {freq} cash flow statement for {ticker} released on {str(latest_cash_flow['Publish Date'])[0:10]}: \n"
@@ -374,28 +423,27 @@ def get_simfin_income_statements(
         "us",
         f"us-income-{freq}.csv",
     )
-    df = pd.read_csv(data_path, sep=";")
 
-    # Convert date strings to datetime objects and remove any time components
+    if not os.path.exists(data_path):
+        return (
+            f"## {freq} income statement for {ticker}: unavailable "
+            f"(SimFin file missing: {data_path})."
+        )
+
+    df = pd.read_csv(data_path, sep=";")
     df["Report Date"] = pd.to_datetime(df["Report Date"], utc=True).dt.normalize()
     df["Publish Date"] = pd.to_datetime(df["Publish Date"], utc=True).dt.normalize()
-
-    # Convert the current date to datetime and normalize
     curr_date_dt = pd.to_datetime(curr_date, utc=True).normalize()
-
-    # Filter the DataFrame for the given ticker and for reports that were published on or before the current date
     filtered_df = df[(df["Ticker"] == ticker) & (df["Publish Date"] <= curr_date_dt)]
 
-    # Check if there are any available reports; if not, return a notification
     if filtered_df.empty:
-        print("No income statement available before the given current date.")
-        return ""
+        return (
+            f"## {freq} income statement for {ticker}: no SimFin report available before {curr_date}."
+        )
 
-    # Get the most recent income statement by selecting the row with the latest Publish Date
     latest_income = filtered_df.loc[filtered_df["Publish Date"].idxmax()]
-
-    # drop the SimFinID column
-    latest_income = latest_income.drop("SimFinId")
+    if "SimFinId" in latest_income.index:
+        latest_income = latest_income.drop("SimFinId")
 
     return (
         f"## {freq} income statement for {ticker} released on {str(latest_income['Publish Date'])[0:10]}: \n"
@@ -445,42 +493,55 @@ def get_reddit_global_news(
         str: A formatted dataframe containing the latest news articles posts on reddit and meta information in these columns: "created_utc", "id", "title", "selftext", "score", "num_comments", "url"
     """
 
-    start_date = datetime.strptime(start_date, "%Y-%m-%d")
-    before = start_date - relativedelta(days=look_back_days)
-    before = before.strftime("%Y-%m-%d")
+    end_dt = datetime.strptime(start_date, "%Y-%m-%d")
+    start_dt = end_dt - relativedelta(days=look_back_days)
+    before = start_dt.strftime("%Y-%m-%d")
+    end_str = end_dt.strftime("%Y-%m-%d")
 
+    online_tools_enabled = _coerce_bool(get_config().get("online_tools", True))
     posts = []
-    # iterate from start_date to end_date
-    curr_date = datetime.strptime(before, "%Y-%m-%d")
+    used_online_fallback = False
+    local_data_path = os.path.join(DATA_DIR, "reddit_data")
+    attempted_terms = get_search_terms(ticker)
 
-    total_iterations = (start_date - curr_date).days + 1
-    pbar = tqdm(desc=f"Getting Global News on {start_date}", total=total_iterations)
+    for offset in range((end_dt - start_dt).days + 1):
+        day_str = (start_dt + relativedelta(days=offset)).strftime("%Y-%m-%d")
+        try:
+            fetch_result = fetch_top_from_category(
+                "global_news",
+                day_str,
+                max_limit_per_day,
+                data_path=local_data_path,
+            )
+            posts.extend(fetch_result)
+        except (FileNotFoundError, NotADirectoryError, ValueError):
+            used_online_fallback = True
+            break
 
-    while curr_date <= start_date:
-        curr_date_str = curr_date.strftime("%Y-%m-%d")
-        fetch_result = fetch_top_from_category(
-            "global_news",
-            curr_date_str,
-            max_limit_per_day,
-            data_path=os.path.join(DATA_DIR, "reddit_data"),
+    if used_online_fallback and online_tools_enabled:
+        posts = fetch_top_from_category_online(
+            category="global_news",
+            start_date=before,
+            end_date=end_str,
+            max_limit=max_limit_per_day * ((end_dt - start_dt).days + 1),
         )
-        posts.extend(fetch_result)
-        curr_date += relativedelta(days=1)
-        pbar.update(1)
-
-    pbar.close()
 
     if len(posts) == 0:
-        return ""
+        source = "reddit_live_api" if used_online_fallback else "reddit_local_dataset"
+        return f"## Global News Reddit, from {before} to {end_str} (source: {source}): No posts found."
 
     news_str = ""
     for post in posts:
-        if post["content"] == "":
-            news_str += f"### {post['title']}\n\n"
+        content = post.get("content", "")
+        subreddit = post.get("subreddit")
+        source_tag = f" [r/{subreddit}]" if subreddit else ""
+        if content == "":
+            news_str += f"### {post.get('title', 'Untitled')}{source_tag}\n\n"
         else:
-            news_str += f"### {post['title']}\n\n{post['content']}\n\n"
+            news_str += f"### {post.get('title', 'Untitled')}{source_tag}\n\n{content}\n\n"
 
-    return f"## Global News Reddit, from {before} to {curr_date}:\n{news_str}"
+    source = "reddit_live_api" if used_online_fallback else "reddit_local_dataset"
+    return f"## Global News Reddit, from {before} to {end_str} (source: {source}):\n{news_str}"
 
 
 def get_reddit_company_news(
@@ -499,47 +560,60 @@ def get_reddit_company_news(
         str: A formatted dataframe containing the latest news articles posts on reddit and meta information in these columns: "created_utc", "id", "title", "selftext", "score", "num_comments", "url"
     """
 
-    start_date = datetime.strptime(start_date, "%Y-%m-%d")
-    before = start_date - relativedelta(days=look_back_days)
-    before = before.strftime("%Y-%m-%d")
+    end_dt = datetime.strptime(start_date, "%Y-%m-%d")
+    start_dt = end_dt - relativedelta(days=look_back_days)
+    before = start_dt.strftime("%Y-%m-%d")
+    end_str = end_dt.strftime("%Y-%m-%d")
 
+    online_tools_enabled = _coerce_bool(get_config().get("online_tools", True))
     posts = []
-    # iterate from start_date to end_date
-    curr_date = datetime.strptime(before, "%Y-%m-%d")
+    used_online_fallback = False
+    local_data_path = os.path.join(DATA_DIR, "reddit_data")
 
-    total_iterations = (start_date - curr_date).days + 1
-    pbar = tqdm(
-        desc=f"Getting Company News for {ticker} on {start_date}",
-        total=total_iterations,
-    )
+    for offset in range((end_dt - start_dt).days + 1):
+        day_str = (start_dt + relativedelta(days=offset)).strftime("%Y-%m-%d")
+        try:
+            fetch_result = fetch_top_from_category(
+                "company_news",
+                day_str,
+                max_limit_per_day,
+                ticker,
+                data_path=local_data_path,
+            )
+            posts.extend(fetch_result)
+        except (FileNotFoundError, NotADirectoryError, ValueError):
+            used_online_fallback = True
+            break
 
-    while curr_date <= start_date:
-        curr_date_str = curr_date.strftime("%Y-%m-%d")
-        fetch_result = fetch_top_from_category(
-            "company_news",
-            curr_date_str,
-            max_limit_per_day,
-            ticker,
-            data_path=os.path.join(DATA_DIR, "reddit_data"),
+    if used_online_fallback and online_tools_enabled:
+        posts = fetch_top_from_category_online(
+            category="company_news",
+            start_date=before,
+            end_date=end_str,
+            max_limit=max_limit_per_day * ((end_dt - start_dt).days + 1),
+            query=ticker,
         )
-        posts.extend(fetch_result)
-        curr_date += relativedelta(days=1)
-
-        pbar.update(1)
-
-    pbar.close()
 
     if len(posts) == 0:
-        return ""
+        source = "reddit_live_api" if used_online_fallback else "reddit_local_dataset"
+        terms_preview = ", ".join(attempted_terms[:8]) if attempted_terms else ticker
+        return (
+            f"## {ticker} News Reddit, from {before} to {end_str} (source: {source}): No posts found.\n"
+            f"Tried search terms: {terms_preview}"
+        )
 
     news_str = ""
     for post in posts:
-        if post["content"] == "":
-            news_str += f"### {post['title']}\n\n"
+        content = post.get("content", "")
+        subreddit = post.get("subreddit")
+        source_tag = f" [r/{subreddit}]" if subreddit else ""
+        if content == "":
+            news_str += f"### {post.get('title', 'Untitled')}{source_tag}\n\n"
         else:
-            news_str += f"### {post['title']}\n\n{post['content']}\n\n"
+            news_str += f"### {post.get('title', 'Untitled')}{source_tag}\n\n{content}\n\n"
 
-    return f"##{ticker} News Reddit, from {before} to {curr_date}:\n\n{news_str}"
+    source = "reddit_live_api" if used_online_fallback else "reddit_local_dataset"
+    return f"## {ticker} News Reddit, from {before} to {end_str} (source: {source}):\n\n{news_str}"
 
 
 def get_stock_stats_indicators_window(
@@ -857,24 +931,34 @@ def get_global_news_openai(curr_date, ticker_context=None):
         return f"Error: OpenAI API key not found. Please set OPENAI_API_KEY environment variable."
     
     try:
+        config = get_config()
+        timeout_seconds = float(config.get("global_news_timeout_seconds", 240))
+
         # Use client with timeout for web search operations
-        client = get_openai_client_with_timeout(api_key)
+        client = get_openai_client_with_timeout(api_key, timeout_seconds=timeout_seconds)
         
         # Get the selected quick model from config
-        config = get_config()
         model = config.get("quick_think_llm", "gpt-4o-mini")  # fallback to default
         
-        # Research depth controls prompt scope and search context
+        # Research depth controls prompt scope/search context; global news uses a tuned fast profile.
         research_depth = config.get("research_depth", "Medium")
         depth_key = research_depth.lower() if research_depth else "medium"
-        search_context = get_search_context_for_depth(research_depth)
+        fast_profile = _coerce_bool(config.get("global_news_fast_profile", True))
+        profile = get_global_news_profile_for_depth(research_depth, fast_profile=fast_profile)
+        search_context = profile["search_context"]
+        depth_effort = profile["effort"]
+        depth_verbosity = profile["verbosity"]
+        max_events = int(config.get("global_news_max_events", 8))
+        word_budget_default = 550 if depth_key in ("shallow", "medium") else 700
+        word_budget = int(config.get("global_news_word_budget", word_budget_default))
         
         from datetime import datetime, timedelta
-        lookback_days = 3 if depth_key == "shallow" else 7 if depth_key == "medium" else 14
+        lookback_days = int(profile["lookback_days"])
         start_date = (datetime.strptime(curr_date, "%Y-%m-%d") - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
         # Get model-specific parameters
-        model_params = get_model_params(model)
+        max_output_tokens = int(config.get("global_news_max_output_tokens", 1800))
+        model_params = get_model_params(model, max_tokens_value=max_output_tokens)
         
         # Check if this is a GPT-5/GPT-5.2 or GPT-4.1 model (both use responses.create())
         gpt5_models = ["gpt-5", "gpt-5-mini", "gpt-5-nano"]
@@ -886,49 +970,48 @@ def get_global_news_openai(curr_date, ticker_context=None):
         
         # Determine if this is crypto-related analysis
         is_crypto = ticker_context and ("/" in ticker_context or "USD" in ticker_context.upper() or "BTC" in ticker_context.upper() or "ETH" in ticker_context.upper())
+        target = ticker_context if ticker_context else ("crypto markets" if is_crypto else "financial markets")
+        store_responses = _coerce_bool(config.get("openai_store_responses", False))
+
+        if is_crypto:
+            focus_points = [
+                "Major crypto regulation, CBDC, or enforcement updates",
+                "Institutional adoption/ETF flow developments tied to crypto demand",
+                "Exchange, custody, security, or infrastructure incidents",
+                "DeFi/protocol developments with market-wide relevance",
+                "Macro policy or geopolitical events that shift crypto risk appetite",
+            ]
+            scope_label = "cryptocurrency markets and blockchain ecosystem"
+        else:
+            focus_points = [
+                "Major economic data and growth/inflation surprises",
+                "Central-bank policy signals and rates/liquidity implications",
+                "Geopolitical events with cross-asset risk impact",
+                f"Sector/industry developments relevant to {target}",
+                "Cross-asset sentiment shifts with equity-market spillover",
+            ]
+            scope_label = "financial markets"
+
+        focus_block = "\n".join(f"{i + 1}. {point}" for i, point in enumerate(focus_points))
+        user_message = (
+            f"Search the web for global news from {start_date} to {curr_date} most relevant to trading {target}.\n"
+            "Prioritize catalysts with likely impact over the next 2-10 trading days.\n"
+            f"Focus on:\n{focus_block}\n"
+            f"Return at most {max_events} events ranked by impact.\n"
+            "For each event include: date, what happened, impact level (minor/moderate/major), "
+            "expected direction (bullish/bearish/mixed), and a short trading implication.\n"
+            "Include a markdown table with columns: Event | Date | Impact | Direction | Trading Implication.\n"
+            f"Keep the full response under about {word_budget} words.\n"
+            "Do not ask follow-up questions. Do not offer extra files or downloads."
+        )
+        developer_message = (
+            "You are a financial news analyst with web search access. Provide concise, source-grounded "
+            f"analysis of global news that can impact {scope_label}. "
+            "Write directly in final form and avoid interactive follow-up prompts."
+        )
         
         if is_gpt5 or is_gpt52 or is_gpt41:
             # Use responses.create() API with web search capabilities
-            if is_crypto:
-                if depth_key == "shallow":
-                    user_message = (
-                        f"Search the web for key crypto market news from {start_date} to {curr_date} that could impact "
-                        f"{ticker_context if ticker_context else 'crypto'} trading. Focus on:\n"
-                        f"1. Major regulatory headlines\n"
-                        f"2. Major exchange or security events\n"
-                        f"3. Macro events affecting crypto sentiment\n"
-                        f"4. Summary table with key events and impact levels"
-                    )
-                else:
-                    user_message = f"Search the web for current global news and developments from {start_date} to {curr_date} that would impact cryptocurrency markets and {ticker_context if ticker_context else 'crypto'} trading. Include:\n" + \
-                                  f"1. Major cryptocurrency and blockchain regulatory developments\n" + \
-                                  f"2. Central bank digital currency (CBDC) announcements and crypto policy updates\n" + \
-                                  f"3. Institutional crypto adoption, ETF developments, and major investment flows\n" + \
-                                  f"4. Major DeFi, smart contract, and blockchain protocol developments\n" + \
-                                  f"5. Crypto exchange developments, security issues, and market infrastructure news\n" + \
-                                  f"6. Macro events affecting crypto (Fed policy, inflation data, geopolitical developments)\n" + \
-                                  f"7. Trading implications and crypto market sentiment\n" + \
-                                  f"8. Summary table with key events and impact levels on crypto markets"
-            else:
-                if depth_key == "shallow":
-                    user_message = (
-                        f"Search the web for key global and macro news from {start_date} to {curr_date} that could impact "
-                        f"{ticker_context if ticker_context else 'financial markets'}. Focus on:\n"
-                        f"1. Major economic events and announcements\n"
-                        f"2. Central bank policy updates\n"
-                        f"3. Geopolitical developments affecting markets\n"
-                        f"4. Summary table with key events and impact levels"
-                    )
-                else:
-                    user_message = f"Search the web for current global and macroeconomic news from {start_date} to {curr_date} that would be informative for trading {ticker_context if ticker_context else 'financial markets'}. Include:\n" + \
-                                  f"1. Major economic events and announcements\n" + \
-                                  f"2. Central bank policy updates\n" + \
-                                  f"3. Geopolitical developments affecting markets\n" + \
-                                  f"4. Economic data releases and their implications\n" + \
-                                  f"5. Sector-specific developments relevant to {ticker_context if ticker_context else 'the market'}\n" + \
-                                  f"6. Trading implications and market sentiment\n" + \
-                                  f"7. Summary table with key events and impact levels"
-            
             # Base parameters for responses.create()
             if is_gpt52:
                 # GPT-5.2 uses "developer" role with specific parameters
@@ -940,7 +1023,7 @@ def get_global_news_openai(curr_date, ticker_context=None):
                             "content": [
                                 {
                                     "type": "input_text",
-                                    "text": f"You are a financial news analyst with web search access. Use real-time web search to provide comprehensive analysis of global news that could impact {'cryptocurrency markets and blockchain ecosystem' if is_crypto else 'financial markets'} and trading decisions."
+                                    "text": developer_message
                                 }
                             ]
                         },
@@ -960,17 +1043,16 @@ def get_global_news_openai(curr_date, ticker_context=None):
                         "user_location": {"type": "approximate"},
                         "search_context_size": search_context
                     }],
+                    "max_output_tokens": max_output_tokens,
                     "include": ["web_search_call.action.sources"]
                 }
                 # Apply GPT-5.2 specific parameters
                 api_params["summary"] = "auto"
                 if "gpt-5.2-pro" in model:
-                    api_params["store"] = True
+                    api_params["store"] = store_responses
                 else:
-                    effort_map = {"shallow": "low", "medium": "medium", "deep": "high"}
-                    verbosity_map = {"shallow": "low", "medium": "medium", "deep": "high"}
-                    api_params["reasoning"] = {"effort": effort_map.get(depth_key, "medium")}
-                    api_params["verbosity"] = verbosity_map.get(depth_key, "medium")
+                    api_params["reasoning"] = {"effort": depth_effort}
+                    api_params["verbosity"] = depth_verbosity
             elif is_gpt5:
                 # GPT-5 uses "developer" role
                 api_params = {
@@ -981,7 +1063,7 @@ def get_global_news_openai(curr_date, ticker_context=None):
                             "content": [
                                 {
                                     "type": "input_text",
-                                    "text": f"You are a financial news analyst with web search access. Use real-time web search to provide comprehensive analysis of global news that could impact {'cryptocurrency markets and blockchain ecosystem' if is_crypto else 'financial markets'} and trading decisions."
+                                    "text": developer_message
                                 }
                             ]
                         },
@@ -995,20 +1077,17 @@ def get_global_news_openai(curr_date, ticker_context=None):
                             ]
                         }
                     ],
-                    "text": {"format": {"type": "text"}, "verbosity": "medium"},
-                    "reasoning": {"effort": "medium", "summary": "auto"},
+                    "text": {"format": {"type": "text"}, "verbosity": depth_verbosity},
+                    "reasoning": {"effort": depth_effort},
                     "tools": [{
                         "type": "web_search",
                         "user_location": {"type": "approximate"},
                         "search_context_size": search_context
                     }],
-                    "store": True,
-                    "include": ["reasoning.encrypted_content", "web_search_call.action.sources"]
+                    "max_output_tokens": max_output_tokens,
+                    "store": store_responses,
+                    "include": ["web_search_call.action.sources"]
                 }
-                effort_map = {"shallow": "low", "medium": "medium", "deep": "high"}
-                verbosity_map = {"shallow": "low", "medium": "medium", "deep": "high"}
-                api_params["reasoning"]["effort"] = effort_map.get(depth_key, "medium")
-                api_params["text"]["verbosity"] = verbosity_map.get(depth_key, "medium")
             elif is_gpt41:
                 # GPT-4.1 uses "system" role  
                 api_params = {
@@ -1019,7 +1098,7 @@ def get_global_news_openai(curr_date, ticker_context=None):
                             "content": [
                                 {
                                     "type": "input_text",
-                                    "text": f"You are a financial news analyst with web search access. Use real-time web search to provide comprehensive analysis of global news that could impact {'cryptocurrency markets and blockchain ecosystem' if is_crypto else 'financial markets'} and trading decisions."
+                                    "text": developer_message
                                 }
                             ]
                         },
@@ -1040,12 +1119,21 @@ def get_global_news_openai(curr_date, ticker_context=None):
                         "user_location": {"type": "approximate"},
                         "search_context_size": search_context
                     }],
-                    "store": True,
+                    "store": store_responses,
                     "include": ["web_search_call.action.sources"]
                 }
                 api_params.update(model_params)  # Add temperature, max_output_tokens, top_p
             
-            response = client.responses.create(**api_params)
+            try:
+                response = client.responses.create(**api_params)
+            except Exception as output_cap_error:
+                # Some model/provider combos may reject max_output_tokens in responses API.
+                if "max_output_tokens" in api_params and "max_output_tokens" in str(output_cap_error):
+                    fallback_params = dict(api_params)
+                    fallback_params.pop("max_output_tokens", None)
+                    response = client.responses.create(**fallback_params)
+                else:
+                    raise
         else:
             # Use standard chat completions API for GPT-4 and other models
             response = client.chat.completions.create(
@@ -1053,7 +1141,7 @@ def get_global_news_openai(curr_date, ticker_context=None):
                 messages=[
                     {
                         "role": "system",
-                        "content": f"You are a financial news analyst. Provide comprehensive analysis of global news that could impact {'cryptocurrency markets and blockchain ecosystem' if is_crypto else 'financial markets'} and trading decisions."
+                        "content": developer_message
                     },
                     {
                         "role": "user",
@@ -1085,6 +1173,8 @@ def get_global_news_openai(curr_date, ticker_context=None):
                 content = str(response)
         else:
             content = response.choices[0].message.content  # Standard chat.completions.create() structure
+
+        content = _strip_trailing_interactive_followup(content)
         
         # Check if content is empty
         if not content or content.strip() == "":
