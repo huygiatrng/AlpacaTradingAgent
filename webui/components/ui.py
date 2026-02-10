@@ -2,7 +2,6 @@
 webui/components/ui.py
 """
 
-import gradio as gr
 from datetime import datetime
 from webui.utils.state import app_state
 from webui.utils.charts import create_chart, create_welcome_chart
