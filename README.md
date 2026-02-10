@@ -94,12 +94,6 @@ git clone https://github.com/TauricResearch/TradingAgents.git
 cd TradingAgents
 ```
 
-Create a virtual environment:
-```bash
-conda create -n alpacatradingagent python=3.13
-conda activate alpacatradingagent
-```
-
 Install dependencies:
 ```bash
 pip install -r requirements.txt
@@ -173,7 +167,12 @@ Common options:
 - `--debug`: Run in debug mode with more logging
 - `--max-threads N`: Set the maximum number of threads (default: 40)
 
-This will start a local web server at http://localhost:7860.
+or you can launch this with Docker via:
+```bash
+docker-compose up -d --build
+```
+
+These will start a local web server at http://localhost:7860.
 
 #### Enhanced Web UI Features
 
