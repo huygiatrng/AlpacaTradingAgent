@@ -1,0 +1,9 @@
+{
+  "metadata": {
+    "function": "get_earnings_surprise_analysis",
+    "args": "('XOM', '2026-02-21', 8)",
+    "kwargs": "{}",
+    "cached_at": "2026-02-21T13:25:30.279841"
+  },
+  "data": "## XOM Earnings Surprise Analysis\n\n**Analysis Period**: 2024-03-03 to 2026-02-21 (Last 8 quarters)\n\n### Key Patterns to Monitor:\n- **Consistency**: Does the company consistently beat/miss estimates?\n- **Magnitude**: How significant are the surprises (>5% is typically material)?\n- **Revenue vs EPS**: Which metric shows more volatility?\n- **Seasonal Patterns**: Are certain quarters historically stronger?\n\n### Trading Implications:\n- **Pre-earnings**: High surprise history = higher IV and option premiums\n- **Post-earnings**: Surprise magnitude often correlates with price movement\n- **Guidance**: Forward guidance often more important than backward-looking results\n\n## XOM Earnings Calendar (2024-03-03 to 2026-02-21)\n\n**Data Source:** Yahoo Finance (via yfinance)\n\n### 2026-01-30\n- **EPS Estimate**: 1.66\n- **EPS Reported**: 1.53\n- **Surprise**: -0.1300 (-7.83%)\n\n### 2025-10-31\n- **EPS Estimate**: 1.79\n- **EPS Reported**: 1.76\n- **Surprise**: -0.0300 (-1.68%)\n\n### 2025-08-01\n- **EPS Estimate**: 1.56\n- **EPS Reported**: 1.64\n- **Surprise**: 0.0800 (+5.13%)\n\n### 2025-05-02\n- **EPS Estimate**: 1.74\n- **EPS Reported**: 1.76\n- **Surprise**: 0.0200 (+1.15%)\n\n### 2025-01-31\n- **EPS Estimate**: 1.55\n- **EPS Reported**: 1.72\n- **Surprise**: 0.1700 (+10.97%)\n\n### 2024-11-01\n- **EPS Estimate**: 1.88\n- **EPS Reported**: 1.92\n- **Surprise**: 0.0400 (+2.13%)\n\n### 2024-08-02\n- **EPS Estimate**: 2.01\n- **EPS Reported**: 2.14\n- **Surprise**: 0.1300 (+6.47%)\n\n### 2024-04-26\n- **EPS Estimate**: 2.16\n- **EPS Reported**: 2.06\n- **Surprise**: -0.1000 (-4.63%)\n\n"
+}

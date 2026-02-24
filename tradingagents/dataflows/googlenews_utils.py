@@ -50,7 +50,7 @@ def getNewsData(query, start_date, end_date, max_pages=3):
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/101.0.4951.54 Safari/537.36"
+            "Chrome/131.0.0.0 Safari/537.36"
         )
     }
 
@@ -70,13 +70,21 @@ def getNewsData(query, start_date, end_date, max_pages=3):
             results_on_page = soup.select("div.SoaBEf")
 
             if not results_on_page:
+                print(f"[GOOGLE NEWS] No results found on page {page}")
+                print(f"[GOOGLE NEWS] Response status: {response.status_code}")
                 break  # No more results found
 
             for el in results_on_page:
                 try:
                     link = el.find("a")["href"]
                     title_el = el.select_one("div.MBeuO")
-                    snippet_el = el.select_one(".GI74Re")
+
+                    # Try multiple selectors for snippet (Google changes these frequently)
+                    snippet_el = (
+                        el.select_one(".VwiC3b") or
+                        el.select_one(".GI74Re") or
+                        el.select_one("div[data-hveid] > div")
+                    )
                     date_el = el.select_one(".LfVVr")
                     source_el = el.select_one(".NUnG9d span")
 
@@ -85,7 +93,7 @@ def getNewsData(query, start_date, end_date, max_pages=3):
                         continue
 
                     title = title_el.get_text()
-                    snippet = snippet_el.get_text()
+                    snippet = snippet_el.get_text().strip()
                     date = date_el.get_text() if date_el else "Unknown"
                     source = source_el.get_text() if source_el else "Unknown"
                     news_results.append(

@@ -33,7 +33,7 @@ def apply_sequential_mode_fix():
         # Patch the process_chunk_updates method to fix report mapping
         original_process_chunk_updates = AppState.process_chunk_updates
         
-        def fixed_process_chunk_updates(self, chunk):
+        def fixed_process_chunk_updates(self, chunk, ticker=None):
             """Fixed version that correctly maps social analyst reports"""
             
             # 🔍 DEBUG: Log what we're receiving
@@ -59,7 +59,7 @@ def apply_sequential_mode_fix():
                             # print(f"[DEBUG] ✅ Social Analyst correctly updating sentiment_report ({sentiment_length} chars)")
             
             # Call the original method with the fixed chunk
-            return original_process_chunk_updates(self, chunk)
+            return original_process_chunk_updates(self, chunk, ticker=ticker)
         
         # Apply the patch
         AppState.process_chunk_updates = fixed_process_chunk_updates
@@ -73,9 +73,14 @@ def apply_sequential_mode_fix():
 
 def create_app():
     """Create and configure the Dash application"""
-    
+
     # Apply the sequential mode fix first
     apply_sequential_mode_fix()
+
+    # Install stdout log interceptor so [TAG] lines are captured for the debug Logs tab
+    from webui.utils.log_interceptor import install as install_log_interceptor
+    from webui.utils.state import app_state as _app_state
+    install_log_interceptor(_app_state)
     
     # Initialize Flask server
     server = Flask(__name__)

@@ -1,0 +1,9 @@
+{
+  "metadata": {
+    "function": "get_earnings_calendar",
+    "args": "('XOM', '2025-08-01', '2026-03-31')",
+    "kwargs": "{}",
+    "cached_at": "2026-02-20T15:12:44.182901"
+  },
+  "data": "## XOM Earnings Calendar (2025-08-01 to 2026-03-31)\n\n**Data Source:** Yahoo Finance (via yfinance)\n\n### 2026-01-30\n- **EPS Estimate**: 1.66\n- **EPS Reported**: 1.53\n- **Surprise**: -0.1300 (-7.83%)\n\n### 2025-10-31\n- **EPS Estimate**: 1.79\n- **EPS Reported**: 1.76\n- **Surprise**: -0.0300 (-1.68%)\n\n### 2025-08-01\n- **EPS Estimate**: 1.56\n- **EPS Reported**: 1.64\n- **Surprise**: 0.0800 (+5.13%)\n\n"
+}

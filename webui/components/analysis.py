@@ -11,7 +11,9 @@ from webui.utils.state import app_state
 from webui.utils.charts import create_chart
 
 
-def execute_trade_after_analysis(ticker, allow_shorts, trade_amount, use_ai_sizing=True):
+def execute_trade_after_analysis(ticker, allow_shorts, trade_amount, use_ai_sizing=True,
+                                use_stop_loss=True, use_take_profit=True,
+                                use_bracket_orders=False):
     """Execute trade based on analysis results"""
     try:
         print(f"[TRADE] Starting trade execution for {ticker}")
@@ -110,17 +112,57 @@ def execute_trade_after_analysis(ticker, allow_shorts, trade_amount, use_ai_sizi
 
         print(f"[TRADE] Executing trade for {ticker}: {recommended_action} with ${actual_trade_amount:,.2f}")
 
+        # Extract approved trading prices from state
+        print(f"[TRADE PRICES] Extracting approved prices from state for {ticker}...")
+        analysis_results = state.get("analysis_results", {})
+        full_state = analysis_results.get("full_state", {})
+        approved_prices = full_state.get("approved_trading_prices", {})
+
+        print(f"[TRADE PRICES] Full state keys: {list(full_state.keys())}")
+        print(f"[TRADE PRICES] Approved prices dict: {approved_prices}")
+
+        # Get stop loss and targets
+        stop_loss = approved_prices.get("stop_loss") if approved_prices else None
+        targets = approved_prices.get("targets", []) if approved_prices else []
+
+        if stop_loss or targets:
+            print(f"[TRADE PRICES] ✅ Prices extracted successfully:")
+            print(f"[TRADE PRICES]   Stop Loss: ${stop_loss:.2f}" if stop_loss else "[TRADE PRICES]   Stop Loss: Not found")
+            print(f"[TRADE PRICES]   Targets: {[f'${t:.2f}' for t in targets]}" if targets else "[TRADE PRICES]   Targets: Not found")
+        else:
+            print(f"[TRADE PRICES] ❌ No stop loss or take profit prices extracted")
+            # Show why extraction might have failed
+            trader_prices = full_state.get("recommended_trading_prices", {})
+            print(f"[TRADE PRICES] Trader prices in state: {trader_prices}")
+            if trader_prices and trader_prices.get("fallback_used"):
+                print(f"[TRADE PRICES] Reason: Trader price extraction failed")
+
         # Get current position
         current_position = AlpacaUtils.get_current_position_state(ticker)
         print(f"[TRADE] Current position for {ticker}: {current_position}")
 
-        # Execute the trading action
+        # Determine final stop/target values based on toggles
+        final_stop_loss = stop_loss if use_stop_loss else None
+        final_take_profit = targets if use_take_profit else None
+
+        print(f"[TRADE] ═══════════════════════════════════════════════════")
+        print(f"[TRADE] Executing trade for {ticker}:")
+        print(f"[TRADE]   Signal: {recommended_action}")
+        print(f"[TRADE]   Amount: ${actual_trade_amount:.2f}")
+        print(f"[TRADE]   Stop Loss: ${final_stop_loss:.2f}" if final_stop_loss else f"[TRADE]   Stop Loss: DISABLED (toggle: {use_stop_loss})")
+        print(f"[TRADE]   Take Profit: {[f'${t:.2f}' for t in final_take_profit]}" if final_take_profit else f"[TRADE]   Take Profit: DISABLED (toggle: {use_take_profit})")
+        print(f"[TRADE] ═══════════════════════════════════════════════════")
+
+        # Execute the trading action with stop/targets (respect toggles)
         result = AlpacaUtils.execute_trading_action(
             symbol=ticker,
             current_position=current_position,
             signal=recommended_action,
             dollar_amount=actual_trade_amount,
-            allow_shorts=allow_shorts
+            allow_shorts=allow_shorts,
+            stop_loss=final_stop_loss,
+            take_profit=final_take_profit,
+            use_bracket_orders=use_bracket_orders
         )
         
         # Check individual action results and provide detailed feedback
@@ -169,12 +211,22 @@ def execute_trade_after_analysis(ticker, allow_shorts, trade_amount, use_ai_sizi
 
 def run_analysis(ticker, selected_analysts, research_depth, allow_shorts, quick_llm, deep_llm, parallel_execution=True, progress=None):
     """Run the trading analysis using current/real-time data"""
+    import threading
+    thread_id = threading.current_thread().name
+
     try:
+        # Set thread-local symbol for tool tracking (thread-safe for parallel batch execution)
+        from tradingagents.agents.utils.agent_utils import set_thread_symbol
+        set_thread_symbol(ticker)
+
         # Always use current date for real-time analysis
         from datetime import datetime
         current_date = datetime.now().strftime("%Y-%m-%d")
-        
-        print(f"Starting real-time analysis for {ticker} with current date: {current_date}")
+
+        print(f"[PARALLEL-{thread_id}] {ticker}: Starting real-time analysis with current date: {current_date}")
+        print(f"[PARALLEL-{thread_id}] {ticker}: Analysts: {selected_analysts}")
+        print(f"[PARALLEL-{thread_id}] {ticker}: Research depth: {research_depth}")
+        print(f"[PARALLEL-{thread_id}] {ticker}: Parallel execution: {parallel_execution}")
         current_state = app_state.get_state(ticker)
         if not current_state:
             print(f"Error: No state found for {ticker}")
@@ -191,8 +243,9 @@ def run_analysis(ticker, selected_analysts, research_depth, allow_shorts, quick_
         config["deep_think_llm"] = deep_llm
         
         # Initialize TradingAgentsGraph
-        print(f"Initializing TradingAgentsGraph with analysts: {selected_analysts}")
+        print(f"[PARALLEL-{thread_id}] {ticker}: Initializing TradingAgentsGraph with analysts: {selected_analysts}")
         graph = TradingAgentsGraph(selected_analysts, config=config, debug=True)
+        print(f"[PARALLEL-{thread_id}] {ticker}: Graph initialized successfully")
         
         # Status updates are now handled in the parallel execution coordinator
         
@@ -200,18 +253,18 @@ def run_analysis(ticker, selected_analysts, research_depth, allow_shorts, quick_
         app_state.needs_ui_update = True
         
         # Run analysis with tracing using current date
-        print(f"Starting graph stream for {ticker} with current market data")
+        print(f"[PARALLEL-{thread_id}] {ticker}: Starting graph stream with current market data")
         trace = []
         for chunk in graph.graph.stream(
-            graph.propagator.create_initial_state(ticker, current_date), 
+            graph.propagator.create_initial_state(ticker, current_date),
             stream_mode="values",
             config={"recursion_limit": 100}
         ):
             # Track progress
             trace.append(chunk)
-            
-            # Process intermediate results
-            app_state.process_chunk_updates(chunk)
+
+            # Process intermediate results - pass ticker explicitly for thread safety
+            app_state.process_chunk_updates(chunk, ticker=ticker)
             
             app_state.needs_ui_update = True
             
@@ -223,13 +276,15 @@ def run_analysis(ticker, selected_analysts, research_depth, allow_shorts, quick_
                 if total_agents > 0:
                     progress(completed_agents / total_agents)
             
-            # Small delay to prevent UI lag
-            time.sleep(0.1)
+            # Small delay to prevent UI lag (reduced for faster streaming)
+            time.sleep(0.05)
         
         # Extract final results
+        print(f"[PARALLEL-{thread_id}] {ticker}: Analysis complete, processing final state")
         final_state = trace[-1]
         decision = graph.process_signal(final_state["final_trade_decision"])
-        
+        print(f"[PARALLEL-{thread_id}] {ticker}: Final decision: {decision}")
+
         # NEW: Persist the extracted decision so the trading engine can act on it directly
         current_state["recommended_action"] = decision
 
@@ -254,15 +309,24 @@ def run_analysis(ticker, selected_analysts, research_depth, allow_shorts, quick_
         trade_enabled = getattr(app_state, 'trade_enabled', False)
         trade_amount = getattr(app_state, 'trade_amount', 1000)
         use_ai_sizing = getattr(app_state, 'use_ai_sizing', True)  # Default to AI sizing enabled
-        print(f"[TRADE] Checking trading settings for {ticker}:")
+        use_stop_loss = getattr(app_state, 'use_stop_loss', True)  # Default to enabled
+        use_take_profit = getattr(app_state, 'use_take_profit', True)  # Default to enabled
+        use_bracket_orders = getattr(app_state, 'use_bracket_orders', False)
+        print(f"[TRADE] ═══════════════════════════════════════════════════")
+        print(f"[TRADE] Trading settings for {ticker}:")
         print(f"[TRADE]   - trade_enabled: {trade_enabled}")
-        print(f"[TRADE]   - trade_amount: {trade_amount}")
+        print(f"[TRADE]   - trade_amount: ${trade_amount}")
         print(f"[TRADE]   - use_ai_sizing: {use_ai_sizing}")
+        print(f"[TRADE]   - use_stop_loss: {use_stop_loss} {'✓' if use_stop_loss else '✗'}")
+        print(f"[TRADE]   - use_take_profit: {use_take_profit} {'✓' if use_take_profit else '✗'}")
+        print(f"[TRADE]   - use_bracket_orders: {use_bracket_orders} {'✓' if use_bracket_orders else '✗'}")
         print(f"[TRADE]   - allow_shorts: {allow_shorts}")
+        print(f"[TRADE] ═══════════════════════════════════════════════════")
 
         if trade_enabled:
             print(f"[TRADE] Trading enabled for {ticker}, executing trade with max ${trade_amount}")
-            execute_trade_after_analysis(ticker, allow_shorts, trade_amount, use_ai_sizing)
+            execute_trade_after_analysis(ticker, allow_shorts, trade_amount, use_ai_sizing,
+                                        use_stop_loss, use_take_profit, use_bracket_orders)
         else:
             print(f"[TRADE] Trading disabled for {ticker}, skipping trade execution")
         
@@ -286,7 +350,13 @@ def run_analysis(ticker, selected_analysts, research_depth, allow_shorts, quick_
 def start_analysis(ticker, analysts_market, analysts_social, analysts_news, analysts_fundamentals, analysts_macro,
                  research_depth, allow_shorts, quick_llm, deep_llm, parallel_execution=True, progress=None):
     """Start real-time analysis function for the UI"""
-    
+    import threading
+    thread_id = threading.current_thread().name
+
+    print(f"[PARALLEL-{thread_id}] {ticker}: ═══════════════════════════════════════")
+    print(f"[PARALLEL-{thread_id}] {ticker}: Starting analysis in thread {thread_id}")
+    print(f"[PARALLEL-{thread_id}] {ticker}: ═══════════════════════════════════════")
+
     # Parse selected analysts
     selected_analysts = []
     if analysts_market:

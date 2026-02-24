@@ -26,6 +26,86 @@ from .propagation import Propagator
 from .reflection import Reflector
 from .signal_processing import SignalProcessor
 
+# Import retry utilities for OpenAI rate limit handling
+try:
+    from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+    import openai
+    TENACITY_AVAILABLE = True
+except ImportError:
+    TENACITY_AVAILABLE = False
+    print("[WARNING] tenacity not installed - rate limit retry disabled. Install with: pip install tenacity>=8.2.0")
+
+
+def invoke_llm_with_retry(llm, messages, max_attempts=3):
+    """Invoke LLM with automatic retry on rate limit errors.
+
+    Retries with exponential backoff when OpenAI rate limits are hit,
+    preventing analysis failures due to temporary API throttling.
+
+    Args:
+        llm: The LLM instance to invoke
+        messages: Messages to send to the LLM
+        max_attempts: Maximum number of retry attempts (default: 3)
+
+    Returns:
+        LLM response
+
+    Raises:
+        Exception: If all retry attempts fail
+    """
+    if not TENACITY_AVAILABLE:
+        # Fallback to direct invocation if tenacity not available
+        return llm.invoke(messages)
+
+    @retry(
+        retry=retry_if_exception_type(openai.RateLimitError),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        stop=stop_after_attempt(max_attempts),
+        before_sleep=lambda retry_state: print(
+            f"[RATE_LIMIT] Hit OpenAI rate limit, retrying in {retry_state.next_action.sleep:.1f}s... (attempt {retry_state.attempt_number}/{max_attempts})"
+        )
+    )
+    def _invoke_with_retry():
+        return llm.invoke(messages)
+
+    return _invoke_with_retry()
+
+
+def get_debate_rounds_from_depth(research_depth: str) -> Tuple[int, int]:
+    """
+    Map research depth to debate round counts.
+
+    Args:
+        research_depth: One of "shallow"/"Shallow", "medium"/"Medium", "deep"/"Deep"
+
+    Returns:
+        Tuple of (max_debate_rounds, max_risk_discuss_rounds)
+        - max_debate_rounds: For bull/bear investment debate
+        - max_risk_discuss_rounds: For risky/safe/neutral risk debate
+
+    Research depth levels:
+        - shallow: 1 round (2 bull/bear calls, 3 risk analyst calls)
+        - medium: 3 rounds (6 bull/bear calls, 9 risk analyst calls)
+        - deep: 5 rounds (10 bull/bear calls, 15 risk analyst calls)
+    """
+    # Normalize to lowercase for case-insensitive matching
+    depth_normalized = research_depth.lower() if isinstance(research_depth, str) else "medium"
+
+    depth_map = {
+        "shallow": (1, 1),
+        "medium": (3, 3),
+        "deep": (5, 5),
+    }
+
+    if depth_normalized not in depth_map:
+        print(f"[CONFIG] Warning: Invalid research_depth '{research_depth}', defaulting to 'medium'")
+        depth_normalized = "medium"
+
+    max_debate_rounds, max_risk_discuss_rounds = depth_map[depth_normalized]
+    print(f"[CONFIG] Research depth: {depth_normalized} → Investment debate: {max_debate_rounds} rounds, Risk debate: {max_risk_discuss_rounds} rounds")
+
+    return max_debate_rounds, max_risk_discuss_rounds
+
 
 class TradingAgentsGraph:
     """Main class that orchestrates the trading agents framework."""
@@ -103,10 +183,23 @@ class TradingAgentsGraph:
         # Create tool nodes
         self.tool_nodes = self._create_tool_nodes()
 
+        # Determine debate rounds based on research depth
+        research_depth = self.config.get("research_depth", "medium")
+
+        # Allow legacy config to override if explicitly set
+        if self.config.get("max_debate_rounds") is not None or self.config.get("max_risk_discuss_rounds") is not None:
+            # Use legacy config values if provided
+            max_debate_rounds = self.config.get("max_debate_rounds", 3)
+            max_risk_discuss_rounds = self.config.get("max_risk_discuss_rounds", 3)
+            print(f"[CONFIG] Using legacy debate settings: max_debate_rounds={max_debate_rounds}, max_risk_discuss_rounds={max_risk_discuss_rounds}")
+        else:
+            # Use research_depth to determine debate rounds
+            max_debate_rounds, max_risk_discuss_rounds = get_debate_rounds_from_depth(research_depth)
+
         # Initialize components
         self.conditional_logic = ConditionalLogic(
-            max_debate_rounds=self.config.get("max_debate_rounds", 2), 
-            max_risk_discuss_rounds=self.config.get("max_risk_discuss_rounds", 2)
+            max_debate_rounds=max_debate_rounds,
+            max_risk_discuss_rounds=max_risk_discuss_rounds
         )
         self.graph_setup = GraphSetup(
             self.quick_thinking_llm,

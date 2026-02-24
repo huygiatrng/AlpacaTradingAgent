@@ -1,0 +1,9 @@
+{
+  "metadata": {
+    "function": "get_earnings_calendar",
+    "args": "('NVDA', '2024-01-01', '2025-02-03')",
+    "kwargs": "{}",
+    "cached_at": "2026-02-03T15:53:56.772815"
+  },
+  "data": "## NVDA Earnings Calendar (2024-01-01 to 2025-02-03)\n\n**Data Source:** Yahoo Finance (via yfinance)\n\n### 2024-11-20\n- **EPS Estimate**: 0.75\n- **EPS Reported**: 0.81\n- **Surprise**: 0.0600 (+8.00%)\n\n### 2024-08-28\n- **EPS Estimate**: 0.64\n- **EPS Reported**: 0.68\n- **Surprise**: 0.0400 (+6.25%)\n\n### 2024-05-22\n- **EPS Estimate**: 0.52\n- **EPS Reported**: 0.6\n- **Surprise**: 0.0800 (+15.38%)\n\n### 2024-02-21\n- **EPS Estimate**: 0.46\n- **EPS Reported**: 0.52\n- **Surprise**: 0.0600 (+13.04%)\n\n"
+}

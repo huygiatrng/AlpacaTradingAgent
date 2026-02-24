@@ -73,6 +73,13 @@ class GraphSetup:
             def execute_single_analyst(analyst_info):
                 """Execute a single analyst in a separate thread"""
                 analyst_type, analyst_node = analyst_info
+
+                # Set the thread-local symbol so tool tracking works correctly in this worker thread
+                # (thread-local storage is not inherited from parent threads)
+                from tradingagents.agents.utils.agent_utils import set_thread_symbol
+                ticker = state.get("company_of_interest", "")
+                if ticker:
+                    set_thread_symbol(ticker)
                 
                 # Create a deep copy of the state for this analyst
                 analyst_state = copy.deepcopy(state)
@@ -85,33 +92,22 @@ class GraphSetup:
                     time.sleep(0.1)  # 100ms delay before starting
                     
                     result_state = analyst_node(analyst_state)
-                    
-                    # Check if the analyst made tool calls
-                    has_tool_calls = False
-                    if result_state.get("messages") and len(result_state["messages"]) > 0:
-                        last_message = result_state["messages"][-1]
-                        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
-                            has_tool_calls = True
-                    
-                    if has_tool_calls:
-                        print(f"[PARALLEL] {analyst_type} analyst making tool calls")
-                        tool_result = tool_nodes[analyst_type].invoke(result_state)
-                        
-                        if tool_result and tool_result.get("messages"):
-                            # Preserve original state fields when merging tool results
-                            merged_state = analyst_state.copy()  # Start with original state
-                            
-                            # Update with tool result messages
-                            merged_state["messages"] = tool_result["messages"]
-                            
-                            # Add a small delay before making the next LLM call
-                            time.sleep(0.2)  # 200ms delay between tool result and next analyst call
-                            
-                            # Run analyst again with tool results
-                            result_state = analyst_node(merged_state)
+
+                    # Check if a report was generated
+                    # EXTRACT REPORT BEFORE MESSAGE CLEANUP
+                    report_field = f"{analyst_type}_report"
+                    if analyst_type == "social":
+                        report_field = "sentiment_report"
+
+                    # Save report content before any cleanup operations
+                    report_content = result_state.get(report_field, "")
+                    has_report = report_content and len(report_content) > 100
+
+                    if not has_report:
+                        print(f"[PARALLEL] WARNING: {analyst_type} analyst completed without generating a report")
                     else:
-                        print(f"[PARALLEL] {analyst_type} analyst completed without tool calls")
-                    
+                        print(f"[PARALLEL] {analyst_type} analyst completed with report ({len(report_content)} chars)")
+
                     # Clean up messages safely
                     if result_state.get("messages"):
                         # Check if all messages have valid IDs before cleaning
@@ -120,9 +116,11 @@ class GraphSetup:
                             # Create a temporary state with only valid messages for cleanup
                             temp_state = {"messages": valid_messages}
                             final_state = delete_nodes[analyst_type](temp_state)
+                            # CRITICAL: Preserve the report after cleanup (may be lost in delete_nodes)
+                            final_state[report_field] = report_content
                             # Preserve other fields from result_state
                             for key, value in result_state.items():
-                                if key != "messages":
+                                if key != "messages" and key != report_field:
                                     final_state[key] = value
                         else:
                             # No valid messages to clean, use result_state as is
@@ -151,19 +149,15 @@ class GraphSetup:
                     
                     return analyst_type, analyst_state
             
-            # Execute all analysts in parallel with staggered starts
+            # Execute all analysts in parallel (no stagger needed with shared OpenAI client)
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(selected_analysts)) as executor:
-                # Submit analyst tasks with delays to avoid API rate limits
+                # Submit all analyst tasks immediately
                 future_to_analyst = {}
                 for i, analyst_type in enumerate(selected_analysts):
-                    # Add a small delay between each analyst start (0.5 seconds apart)
-                    if i > 0:
-                        time.sleep(0.5)
-                    
                     analyst_node = analyst_nodes[analyst_type]
                     future = executor.submit(execute_single_analyst, (analyst_type, analyst_node))
                     future_to_analyst[future] = analyst_type
-                    print(f"[PARALLEL] Submitted {analyst_type} analyst (delay: {i * 0.5}s)")
+                    print(f"[PARALLEL] Submitted {analyst_type} analyst")
                 
                 # Collect results as they complete
                 completed_results = {}
@@ -184,26 +178,34 @@ class GraphSetup:
             
             # Collect all analyst reports
             for analyst_type, result_state in completed_results.items():
-                if result_state["messages"]:
-                    # Extract the analyst's report from their final message
+                # Determine the report field name
+                report_field = f"{analyst_type}_report"
+                if analyst_type == "social":
+                    report_field = "sentiment_report"
+
+                # First, check if report is already in result_state (preferred method)
+                report_content = result_state.get(report_field)
+
+                # If not found, try to extract from messages
+                if not report_content and result_state.get("messages"):
                     final_message = result_state["messages"][-1]
                     if hasattr(final_message, 'content') and final_message.content:
-                        # Store the report in the appropriate field
-                        report_field = f"{analyst_type}_report"
-                        if analyst_type == "social":
-                            report_field = "sentiment_report"
-                        
-                        # Add to state
-                        final_state[report_field] = final_message.content
-                        print(f"[PARALLEL] Stored {analyst_type} report")
-                        
-                        # Update report in UI state as well
-                        if ui_available:
-                            ticker = state.get("ticker", "")
-                            if ticker:
-                                ui_state = app_state.get_state(ticker)
-                                if ui_state:
-                                    ui_state["current_reports"][report_field] = final_message.content
+                        report_content = final_message.content
+
+                # Store the report if found
+                if report_content:
+                    final_state[report_field] = report_content
+                    print(f"[PARALLEL] Stored {analyst_type} report ({len(report_content)} chars)")
+
+                    # Update report in UI state as well
+                    if ui_available:
+                        ticker = state.get("ticker", "")
+                        if ticker:
+                            ui_state = app_state.get_state(ticker)
+                            if ui_state:
+                                ui_state["current_reports"][report_field] = report_content
+                else:
+                    print(f"[PARALLEL] WARNING: No report found for {analyst_type} analyst")
             
             print(f"[PARALLEL] Parallel analyst execution completed")
             return final_state
@@ -226,8 +228,10 @@ class GraphSetup:
             raise ValueError("Trading Agents Graph Setup Error: no analysts selected!")
         
         # Check if parallel execution is enabled
-        parallel_mode = self.config.get("parallel_analysts", True)
+        parallel_mode = self.config.get("parallel_analysts", False)  # Default to sequential
+        print(f"[SETUP] Config parallel_analysts={parallel_mode}")
         print(f"[SETUP] Using {'parallel' if parallel_mode else 'sequential'} analyst execution mode")
+        print(f"[SETUP] Selected analysts: {selected_analysts}")
 
         # Create analyst nodes
         analyst_nodes = {}
@@ -309,13 +313,25 @@ class GraphSetup:
             workflow.add_edge("Parallel Analysts", "Bull Researcher")
         else:
             # Add individual analyst nodes for sequential execution
+            # Analysts handle tool calling internally, so no need for separate tool nodes
             for analyst_type, node in analyst_nodes.items():
-                workflow.add_node(f"{analyst_type.capitalize()} Analyst", node)
+                # Wrap analyst node with synchronization logging
+                def create_sync_wrapper(atype, node_func):
+                    def wrapped(state):
+                        print(f"[SEQUENTIAL] Starting {atype} analyst")
+                        result = node_func(state)
+                        print(f"[SEQUENTIAL] Completed {atype} analyst")
+                        return result
+                    return wrapped
+
+                workflow.add_node(
+                    f"{analyst_type.capitalize()} Analyst",
+                    create_sync_wrapper(analyst_type, node)
+                )
                 workflow.add_node(
                     f"Msg Clear {analyst_type.capitalize()}", delete_nodes[analyst_type]
                 )
-                workflow.add_node(f"tools_{analyst_type}", tool_nodes[analyst_type])
-            
+
             # Define edges for sequential execution
             # Start with the first analyst
             first_analyst = selected_analysts[0]
@@ -324,16 +340,11 @@ class GraphSetup:
             # Connect analysts in sequence
             for i, analyst_type in enumerate(selected_analysts):
                 current_analyst = f"{analyst_type.capitalize()} Analyst"
-                current_tools = f"tools_{analyst_type}"
                 current_clear = f"Msg Clear {analyst_type.capitalize()}"
 
-                # Add conditional edges for current analyst
-                workflow.add_conditional_edges(
-                    current_analyst,
-                    getattr(self.conditional_logic, f"should_continue_{analyst_type}"),
-                    [current_tools, current_clear],
-                )
-                workflow.add_edge(current_tools, current_analyst)
+                # In sequential mode, analysts handle tools internally
+                # Just route directly from analyst to message clear
+                workflow.add_edge(current_analyst, current_clear)
 
                 # Connect to next analyst or to Bull Researcher if this is the last analyst
                 if i < len(selected_analysts) - 1:

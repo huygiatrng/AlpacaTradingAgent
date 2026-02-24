@@ -1,0 +1,9 @@
+{
+  "metadata": {
+    "function": "get_earnings_calendar",
+    "args": "('AAPL', '2024-01-01', '2025-02-03')",
+    "kwargs": "{}",
+    "cached_at": "2026-02-03T15:54:20.453843"
+  },
+  "data": "## AAPL Earnings Calendar (2024-01-01 to 2025-02-03)\n\n**Data Source:** Yahoo Finance (via yfinance)\n\n### 2025-01-30\n- **EPS Estimate**: 2.34\n- **EPS Reported**: 2.4\n- **Surprise**: 0.0600 (+2.56%)\n\n### 2024-10-31\n- **EPS Estimate**: 1.6\n- **EPS Reported**: 1.64\n- **Surprise**: 0.0400 (+2.50%)\n\n### 2024-08-01\n- **EPS Estimate**: 1.34\n- **EPS Reported**: 1.4\n- **Surprise**: 0.0600 (+4.48%)\n\n### 2024-05-02\n- **EPS Estimate**: 1.51\n- **EPS Reported**: 1.53\n- **Surprise**: 0.0200 (+1.32%)\n\n### 2024-02-01\n- **EPS Estimate**: 2.1\n- **EPS Reported**: 2.18\n- **Surprise**: 0.0800 (+3.81%)\n\n"
+}

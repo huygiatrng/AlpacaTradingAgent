@@ -1,0 +1,9 @@
+{
+  "metadata": {
+    "function": "get_earnings_calendar",
+    "args": "('WMT', '2025-11-01', '2026-03-01')",
+    "kwargs": "{}",
+    "cached_at": "2026-02-20T16:42:19.173236"
+  },
+  "data": "## WMT Earnings Calendar (2025-11-01 to 2026-03-01)\n\n**Data Source:** Yahoo Finance (via yfinance)\n\n### 2025-11-20\n- **EPS Estimate**: 0.6\n- **EPS Reported**: 0.77\n- **Surprise**: 0.1700 (+28.33%)\n\n"
+}

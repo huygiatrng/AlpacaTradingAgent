@@ -1,0 +1,9 @@
+{
+  "metadata": {
+    "function": "get_earnings_calendar",
+    "args": "('JPM', '2026-01-01', '2026-03-31')",
+    "kwargs": "{}",
+    "cached_at": "2026-02-21T13:25:08.604174"
+  },
+  "data": "## JPM Earnings Calendar (2026-01-01 to 2026-03-31)\n\n**Data Source:** Yahoo Finance (via yfinance)\n\n### 2026-01-13\n- **EPS Estimate**: 4.82\n- **EPS Reported**: 4.63\n- **Surprise**: -0.1900 (-3.94%)\n\n"
+}

@@ -8,9 +8,11 @@ import dash_bootstrap_components as dbc
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
+import time
 
 from webui.utils.state import app_state
 from webui.utils.charts import create_chart, create_welcome_chart
+from webui.config.constants import SYMBOL_CLICK_DEBOUNCE_SECONDS
 
 
 def create_symbol_button(symbol, index, is_active=False):
@@ -34,8 +36,15 @@ def register_chart_callbacks(app):
     )
     def update_chart_symbol_pagination(store_data, n_intervals):
         """Update the symbol pagination buttons for charts"""
+
+        # CHECK: Has user clicked recently? If so, don't override their choice
+        time_since_last_click = time.time() - app_state.last_symbol_click_time
+        if time_since_last_click < SYMBOL_CLICK_DEBOUNCE_SECONDS:
+            # User clicked recently - don't update to prevent override
+            return dash.no_update
+
         if not app_state.symbol_states:
-            return html.Div("No symbols available", 
+            return html.Div("No symbols available",
                           className="text-muted text-center",
                           style={"padding": "10px"})
         
@@ -68,7 +77,6 @@ def register_chart_callbacks(app):
 
     @app.callback(
         [Output("chart-pagination", "active_page", allow_duplicate=True),
-         Output("report-pagination", "active_page", allow_duplicate=True),
          Output("chart-pagination-container", "children", allow_duplicate=True)],
         [Input({"type": "symbol-btn", "index": ALL, "component": "charts"}, "n_clicks")],
         prevent_initial_call=True
@@ -76,8 +84,8 @@ def register_chart_callbacks(app):
     def handle_chart_symbol_click(symbol_clicks):
         """Handle symbol button clicks for charts with immediate visual feedback"""
         if not any(symbol_clicks) or not ctx.triggered:
-            return dash.no_update, dash.no_update, dash.no_update
-        
+            return dash.no_update, dash.no_update
+
         # Find which button was clicked
         button_id = ctx.triggered[0]["prop_id"]
         if "symbol-btn" in button_id:
@@ -85,36 +93,44 @@ def register_chart_callbacks(app):
             import json
             button_data = json.loads(button_id.split('.')[0])
             clicked_index = button_data["index"]
-            
-            # Update current symbol
+
+            # Update chart-specific symbol
             symbols = list(app_state.symbol_states.keys())
             if 0 <= clicked_index < len(symbols):
+                # CRITICAL: Record timestamp BEFORE updating symbol
+                app_state.last_symbol_click_time = time.time()
+
+                # Track chart-specific active symbol
+                app_state.active_chart_symbol = symbols[clicked_index]
+
+                # Also update current_symbol for backward compatibility
                 app_state.current_symbol = symbols[clicked_index]
+
                 page_number = clicked_index + 1
-                
+
                 # ⚡ IMMEDIATE BUTTON UPDATE - No waiting for refresh!
                 buttons = []
                 for i, symbol in enumerate(symbols):
                     is_active = i == clicked_index  # Active state based on click
                     buttons.append(create_symbol_button(symbol, i, is_active))
-                
+
                 if len(symbols) > 1:
                     # Add navigation info
                     nav_info = html.Div([
                         html.I(className="fas fa-chart-line me-2"),
                         f"Charts for {len(symbols)} symbols"
                     ], className="text-muted small text-center mt-2")
-                    
+
                     button_container = html.Div([
                         dbc.ButtonGroup(buttons, className="d-flex flex-wrap justify-content-center"),
                         nav_info
                     ], className="symbol-pagination-wrapper")
                 else:
                     button_container = dbc.ButtonGroup(buttons, className="d-flex justify-content-center")
-                
-                return page_number, page_number, button_container
-        
-        return dash.no_update, dash.no_update, dash.no_update
+
+                return page_number, button_container
+
+        return dash.no_update, dash.no_update
 
     @app.callback(
         [Output("chart-container", "figure"),

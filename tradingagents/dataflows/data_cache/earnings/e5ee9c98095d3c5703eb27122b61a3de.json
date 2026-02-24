@@ -1,0 +1,9 @@
+{
+  "metadata": {
+    "function": "get_earnings_calendar",
+    "args": "('AMD', '2026-01-01', '2026-03-31')",
+    "kwargs": "{}",
+    "cached_at": "2026-02-19T23:56:15.574563"
+  },
+  "data": "## AMD Earnings Calendar (2026-01-01 to 2026-03-31)\n\n**Data Source:** Yahoo Finance (via yfinance)\n\n### 2026-02-03\n- **EPS Estimate**: 1.32\n- **EPS Reported**: 1.53\n- **Surprise**: 0.2100 (+15.91%)\n\n"
+}

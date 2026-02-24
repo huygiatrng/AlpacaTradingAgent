@@ -13,6 +13,8 @@ from webui.components.chart_panel import create_chart_panel
 from webui.components.decision_panel import create_decision_panel
 from webui.components.reports_panel import create_reports_panel
 from webui.components.alpaca_account import render_alpaca_account_section
+from webui.components.batch_overview_panel import create_batch_overview_panel
+from webui.components.debug_panel import create_debug_panel
 from webui.config.constants import COLORS, REFRESH_INTERVALS
 
 
@@ -162,6 +164,8 @@ def create_main_layout():
                 dbc.Col([
                     chart_card,
                     html.Div(className="mb-3"),  # Add some spacing
+                    create_batch_overview_panel(),
+                    html.Div(className="mb-3"),  # Add some spacing
                     status_card,
                     html.Div(className="mb-3"),  # Add some spacing
                     decision_card,
@@ -170,10 +174,13 @@ def create_main_layout():
             reports_card,
             html.Div(className="mt-4"),
             create_footer(),
+
+            # Debug panel (side panel)
+            create_debug_panel(),
         ],
         fluid=True,
         className="p-4",
         style={"backgroundColor": COLORS["background"]}
     )
-    
+
     return layout 

@@ -1,0 +1,9 @@
+{
+  "metadata": {
+    "function": "get_yield_curve_analysis",
+    "args": "('2026-02-24',)",
+    "kwargs": "{}",
+    "cached_at": "2026-02-24T10:29:15.851839"
+  },
+  "data": "## Treasury Yield Curve as of 2026-02-24\n\nNo recent yield curve data available.\n"
+}

@@ -1,0 +1,9 @@
+{
+  "metadata": {
+    "function": "get_economic_indicators",
+    "args": "('2026-02-03', 30)",
+    "kwargs": "{}",
+    "cached_at": "2026-02-03T15:09:22.126641"
+  },
+  "data": "## Economic Indicators Report (2026-01-04 to 2026-02-03)\n\n### Federal Funds Rate\n- **Latest Value**: 3.64 % (as of 2026-01-01)\n- **Description**: Federal Reserve's target interest rate\n- **\ud83d\udca1 Analysis**: Neutral monetary policy stance\n\n### Consumer Price Index (CPI)\n**No data available**\n\n### Producer Price Index (PPI)\n**No data available**\n\n### Unemployment Rate\n**No data available**\n\n### Nonfarm Payrolls\n**No data available**\n\n### GDP Growth Rate\n**No data available**\n\n### ISM Manufacturing PMI\n**Error**: Failed to fetch FRED data for NAPM: 400 Client Error: Bad Request for url: https://api.stlouisfed.org/fred/series/observations?series_id=NAPM&api_key=0506404e3df937312537675f16552081&file_type=json&observation_start=2026-01-04&observation_end=2026-02-03&sort_order=desc&limit=100\n\n### Consumer Confidence\n**No data available**\n\n### VIX\n- **Latest Value**: 16.34 Index (as of 2026-02-02)\n- **Description**: Market volatility index\n- **Change**: -1.10 Index (-6.31%)\n- **Previous**: 17.44 Index (as of 2026-01-30)\n- **\ud83d\udca1 Analysis**: Moderate market volatility\n\n"
+}

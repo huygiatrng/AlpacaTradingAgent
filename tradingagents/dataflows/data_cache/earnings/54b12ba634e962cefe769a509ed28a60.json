@@ -1,0 +1,9 @@
+{
+  "metadata": {
+    "function": "get_earnings_calendar",
+    "args": "('MSFT', '2025-11-01', '2026-03-31')",
+    "kwargs": "{}",
+    "cached_at": "2026-02-20T16:02:42.238934"
+  },
+  "data": "## MSFT Earnings Calendar (2025-11-01 to 2026-03-31)\n\n**Data Source:** Yahoo Finance (via yfinance)\n\n### 2026-01-28\n- **EPS Estimate**: 3.92\n- **EPS Reported**: 4.14\n- **Surprise**: 0.2200 (+5.61%)\n\n"
+}

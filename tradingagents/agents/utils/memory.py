@@ -13,18 +13,44 @@ class FinancialSituationMemory:
         self.chroma_client = chromadb.Client(Settings(allow_reset=True))
         self.situation_collection = self.chroma_client.get_or_create_collection(name=name)
 
+    def _summarize_text(self, text, target_chars=20000):
+        """Use AI to intelligently summarize text that exceeds character limit"""
+        print(f"[MEMORY] Summarizing text ({len(text)} chars) to fit embedding limits...")
+
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",  # Fast and cost-effective for summarization
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a financial analysis summarizer. Condense the given text while preserving all key insights, data points, decisions, and reasoning. Maintain technical accuracy and important numerical details. Target length: approximately 20,000 characters or less."
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Summarize this financial analysis while preserving all critical information:\n\n{text}"
+                    }
+                ],
+                temperature=0.3,  # Lower temperature for more focused summarization
+            )
+            summarized = response.choices[0].message.content
+            print(f"[MEMORY] Successfully summarized to {len(summarized)} characters")
+            return summarized
+        except Exception as e:
+            # Fallback to truncation if summarization fails
+            print(f"[MEMORY] Warning: Summarization failed ({str(e)}), falling back to truncation")
+            half_chars = target_chars // 2
+            return text[:half_chars] + "\n...[TRUNCATED]...\n" + text[-half_chars:]
+
     def get_embedding(self, text):
         """Get OpenAI embedding for a text"""
-        # Truncate text if it exceeds the model's token limit
         # text-embedding-ada-002 has a max context length of 8192 tokens
         # Conservative estimate: ~3 characters per token for safety margin
         max_chars = 24000  # ~8000 tokens * 3 chars/token
+
         if len(text) > max_chars:
-            # Take first part and last part to preserve both beginning and end context
-            half_chars = max_chars // 2
-            text = text[:half_chars] + "\n...[TRUNCATED]...\n" + text[-half_chars:]
-            print(f"[MEMORY] Warning: Text truncated to ~{max_chars} characters for embedding")
-        
+            # Use AI to intelligently summarize instead of simple truncation
+            text = self._summarize_text(text, target_chars=20000)
+
         response = self.client.embeddings.create(
             model="text-embedding-ada-002", input=text
         )

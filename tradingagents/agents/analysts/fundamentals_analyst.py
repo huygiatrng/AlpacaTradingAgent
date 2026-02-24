@@ -2,6 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 import time
 import json
 from langchain_core.messages import AIMessage, ToolMessage
+from tradingagents.agents.utils.agent_utils import log_llm_start, log_llm_end
 
 # Import prompt capture utility
 try:
@@ -39,31 +40,20 @@ def create_fundamentals_analyst(llm, toolkit):
                 elif "USD" in ticker.upper():
                     display_ticker = ticker.upper().replace("USD", "")
 
-            if toolkit.config["online_tools"]:
-                if is_crypto:
-                    tools = [
-                        toolkit.get_defillama_fundamentals,
-                        toolkit.get_earnings_calendar  # For crypto events/announcements
-                    ]
-                    # print(f"[FUNDAMENTALS] Using online crypto tools: DeFiLlama + Events Calendar")
-                else:
-                    tools = [
-                        toolkit.get_fundamentals_openai,
-                        toolkit.get_earnings_calendar,
-                        toolkit.get_earnings_surprise_analysis,
-                    ]
-                    # print(f"[FUNDAMENTALS] Using online stock tools: OpenAI Fundamentals + Earnings Analysis")
+            # All tools now use smart caching - no need for online_tools flag
+            if is_crypto:
+                tools = [
+                    toolkit.get_defillama_fundamentals,  # DeFiLlama data (with caching)
+                    toolkit.get_earnings_calendar  # For crypto events/announcements (with caching)
+                ]
+                # print(f"[FUNDAMENTALS] Using crypto tools: DeFiLlama + Events Calendar")
             else:
                 tools = [
-                    toolkit.get_finnhub_company_insider_sentiment,
-                    toolkit.get_finnhub_company_insider_transactions,
-                    toolkit.get_simfin_balance_sheet,
-                    toolkit.get_simfin_cashflow,
-                    toolkit.get_simfin_income_stmt,
-                    toolkit.get_earnings_calendar,
-                    toolkit.get_earnings_surprise_analysis
+                    toolkit.get_fundamentals_openai,
+                    toolkit.get_earnings_calendar,  # Earnings data (with caching)
+                    toolkit.get_earnings_surprise_analysis,  # Earnings analysis (with caching)
                 ]
-                # print(f"[FUNDAMENTALS] Using offline tools: Finnhub + SimFin + Earnings Analysis")
+                # print(f"[FUNDAMENTALS] Using stock tools: OpenAI Fundamentals + Earnings Analysis")
 
             system_message = (
                 "You are an EOD TRADING fundamentals analyst focused on identifying fundamental catalysts and factors that could drive overnight and next-day price movements. "
@@ -144,16 +134,37 @@ For your reference, the current date is {current_date}. {asset_type_text} {ticke
             # Copy the incoming conversation history so we can append to it when the model makes tool calls
             messages_history = list(state["messages"])
 
+            # Track tools that have failed to prevent LLM retries
+            failed_tools = set()
+            max_iterations = 5  # Prevent infinite loops
+            iteration_count = 0
+
             # First LLM response
-            result = chain.invoke(messages_history)
+            model_name = getattr(llm, 'model_name', 'unknown')
+            llm_start_time = log_llm_start("FUNDAMENTALS_ANALYST", model_name)
+            try:
+                result = chain.invoke(messages_history)
+                log_llm_end("FUNDAMENTALS_ANALYST", model_name, llm_start_time, result)
+            except Exception as e:
+                elapsed = time.time() - llm_start_time
+                print(f"[LLM - FUNDAMENTALS_ANALYST] ❌ {model_name} failed after {elapsed:.2f}s: {str(e)}")
+                raise
 
             # Handle iterative tool calls until the model stops requesting them
-            while getattr(result, "additional_kwargs", {}).get("tool_calls"):
-                for tool_call in result.additional_kwargs["tool_calls"]:
+            # Check both result.tool_calls (modern LangChain) and additional_kwargs["tool_calls"] (legacy)
+            tool_calls_list = getattr(result, "tool_calls", None) or getattr(result, "additional_kwargs", {}).get("tool_calls", [])
+            while tool_calls_list and iteration_count < max_iterations:
+                iteration_count += 1
+                # Append the AI message with tool calls (it's already properly formatted)
+                messages_history.append(result)
+
+                # Execute each tool and collect results
+                for tool_call in tool_calls_list:
                     # Handle different tool call structures
                     if isinstance(tool_call, dict):
                         tool_name = tool_call.get("name") or tool_call.get("function", {}).get("name")
                         tool_args = tool_call.get("args", {}) or tool_call.get("function", {}).get("arguments", {})
+                        tool_call_id = tool_call.get("id") or tool_call.get("tool_call_id")
                         if isinstance(tool_args, str):
                             try:
                                 tool_args = json.loads(tool_args)
@@ -163,40 +174,74 @@ For your reference, the current date is {current_date}. {asset_type_text} {ticke
                         # Handle LangChain ToolCall objects
                         tool_name = getattr(tool_call, 'name', None)
                         tool_args = getattr(tool_call, 'args', {})
+                        tool_call_id = getattr(tool_call, 'id', None)
+
+                    # Check if this tool has already failed - SKIP RETRY
+                    if tool_name in failed_tools:
+                        tool_result = f"PERMANENT FAILURE: Tool '{tool_name}' already failed in this analysis. Will not retry. Proceed with analysis using other available data sources."
+                        print(f"[FUNDAMENTALS] ⚠️ Skipping retry of failed tool: {tool_name}")
+                        tool_msg = ToolMessage(
+                            content=tool_result,
+                            tool_call_id=tool_call_id,
+                        )
+                        messages_history.append(tool_msg)
+                        continue
 
                     # Find the matching tool by name
                     tool_fn = next((t for t in tools if t.name == tool_name), None)
 
                     if tool_fn is None:
                         tool_result = f"Tool '{tool_name}' not found."
-                        # print(f"[FUNDAMENTALS] ⚠️ {tool_result}")
+                        print(f"[FUNDAMENTALS] ⚠️ {tool_result}")
                     else:
                         try:
+                            print(f"[FUNDAMENTALS] 🔧 Starting tool '{tool_name}'...")
+                            start_time = time.time()
+
                             # LangChain Tool objects expose `.run` (string IO) as well as `.invoke` (dict/kwarg IO)
                             if hasattr(tool_fn, "invoke"):
                                 tool_result = tool_fn.invoke(tool_args)
                             else:
                                 tool_result = tool_fn.run(**tool_args)
-                            
-                        except Exception as tool_err:
-                            tool_result = f"Error running tool '{tool_name}': {str(tool_err)}"
 
-                    # Append the assistant tool call and tool result messages so the LLM can continue the conversation
-                    tool_call_id = tool_call.get("id") or tool_call.get("tool_call_id")
-                    ai_tool_call_msg = AIMessage(
-                        content="",
-                        additional_kwargs={"tool_calls": [tool_call]},
-                    )
+                            elapsed = time.time() - start_time
+                            print(f"[FUNDAMENTALS] ✅ Tool '{tool_name}' completed (took {elapsed:.2f}s)")
+
+                        except TimeoutError as timeout_err:
+                            elapsed = time.time() - start_time
+                            # Mark this tool as failed to prevent retries
+                            failed_tools.add(tool_name)
+                            tool_result = f"PERMANENT FAILURE: Tool '{tool_name}' timed out after {elapsed:.0f}s. This tool will not be retried. Proceed with analysis using other available data sources."
+                            print(f"[FUNDAMENTALS] ⏰ TIMEOUT: {tool_result}")
+                        except Exception as tool_err:
+                            elapsed = time.time() - start_time
+                            tool_result = f"Error running tool '{tool_name}': {str(tool_err)}"
+                            print(f"[FUNDAMENTALS] ❌ Tool '{tool_name}' failed after {elapsed:.2f}s: {str(tool_err)}")
+
+                    # Append the tool result message
                     tool_msg = ToolMessage(
                         content=str(tool_result),
                         tool_call_id=tool_call_id,
                     )
-
-                    messages_history.append(ai_tool_call_msg)
                     messages_history.append(tool_msg)
 
                 # Ask the LLM to continue with the new context
-                result = chain.invoke(messages_history)
+                model_name = getattr(llm, 'model_name', 'unknown')
+                llm_start_time = log_llm_start("FUNDAMENTALS_ANALYST", model_name)
+                try:
+                    result = chain.invoke(messages_history)
+                    log_llm_end("FUNDAMENTALS_ANALYST", model_name, llm_start_time, result)
+                except Exception as e:
+                    elapsed = time.time() - llm_start_time
+                    print(f"[LLM - FUNDAMENTALS_ANALYST] ❌ {model_name} failed after {elapsed:.2f}s: {str(e)}")
+                    raise
+
+                # Update tool_calls_list for next iteration
+                tool_calls_list = getattr(result, "tool_calls", None) or getattr(result, "additional_kwargs", {}).get("tool_calls", [])
+             
+            # Check if we hit max iterations
+            if iteration_count >= max_iterations:
+                print(f"[FUNDAMENTALS] ⚠️ Reached max tool iterations ({max_iterations}). Proceeding with available data.")
              
             elapsed_time = time.time() - start_time
             # print(f"[FUNDAMENTALS] ✅ Analysis completed in {elapsed_time:.2f} seconds")
@@ -214,8 +259,16 @@ You must conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** followed b
                 
                 # Use a simple chain without tools for the final recommendation
                 final_chain = llm
-                final_result = final_chain.invoke(final_prompt)
-                
+                model_name = getattr(llm, 'model_name', 'unknown')
+                llm_start_time = log_llm_start("FUNDAMENTALS_ANALYST", model_name)
+                try:
+                    final_result = final_chain.invoke(final_prompt)
+                    log_llm_end("FUNDAMENTALS_ANALYST", model_name, llm_start_time, final_result)
+                except Exception as e:
+                    elapsed = time.time() - llm_start_time
+                    print(f"[LLM - FUNDAMENTALS_ANALYST] ❌ {model_name} failed after {elapsed:.2f}s: {str(e)}")
+                    raise
+
                 # Combine the analysis with the final proposal
                 combined_content = result.content + "\n\n" + final_result.content
                 result = AIMessage(content=combined_content)
@@ -223,9 +276,21 @@ You must conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** followed b
             # Append final assistant response to history for downstream agents
             messages_history.append(result)
 
+            # Ensure we have a report
+            if not result.content or len(result.content) < 100:
+                # Fallback: create a summary from tool results if final LLM call failed
+                fallback_report = f"Fundamentals Analysis for {ticker}:\n\n"
+                for msg in messages_history:
+                    if hasattr(msg, '__class__') and msg.__class__.__name__ == 'ToolMessage':
+                        fallback_report += f"{msg.content[:500]}\n\n"
+                fundamentals_report = fallback_report if len(fallback_report) > 100 else "Error: Fundamentals analysis could not be completed"
+                print(f"[FUNDAMENTALS] ⚠️ Using fallback report due to insufficient content from LLM")
+            else:
+                fundamentals_report = result.content
+
             return {
                 "messages": messages_history,
-                "fundamentals_report": result.content,
+                "fundamentals_report": fundamentals_report,
             }
             
         except Exception as e:

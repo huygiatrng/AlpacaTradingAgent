@@ -1,0 +1,9 @@
+{
+  "metadata": {
+    "function": "get_earnings_surprise_analysis",
+    "args": "('WMT', '2026-02-20', 8)",
+    "kwargs": "{}",
+    "cached_at": "2026-02-20T14:54:43.734987"
+  },
+  "data": "## WMT Earnings Surprise Analysis\n\n**Analysis Period**: 2024-03-02 to 2026-02-20 (Last 8 quarters)\n\n### Key Patterns to Monitor:\n- **Consistency**: Does the company consistently beat/miss estimates?\n- **Magnitude**: How significant are the surprises (>5% is typically material)?\n- **Revenue vs EPS**: Which metric shows more volatility?\n- **Seasonal Patterns**: Are certain quarters historically stronger?\n\n### Trading Implications:\n- **Pre-earnings**: High surprise history = higher IV and option premiums\n- **Post-earnings**: Surprise magnitude often correlates with price movement\n- **Guidance**: Forward guidance often more important than backward-looking results\n\n## WMT Earnings Calendar (2024-03-02 to 2026-02-20)\n\n**Data Source:** Yahoo Finance (via yfinance)\n\n### 2025-11-20\n- **EPS Estimate**: 0.6\n- **EPS Reported**: 0.77\n- **Surprise**: 0.1700 (+28.33%)\n\n### 2025-08-21\n- **EPS Estimate**: 0.74\n- **EPS Reported**: 0.68\n- **Surprise**: -0.0600 (-8.11%)\n\n### 2025-05-15\n- **EPS Estimate**: 0.58\n- **EPS Reported**: 0.56\n- **Surprise**: -0.0200 (-3.45%)\n\n### 2025-02-20\n- **EPS Estimate**: 0.64\n- **EPS Reported**: 0.65\n- **Surprise**: 0.0100 (+1.56%)\n\n### 2024-11-19\n- **EPS Estimate**: 0.53\n- **EPS Reported**: 0.57\n- **Surprise**: 0.0400 (+7.55%)\n\n### 2024-08-15\n- **EPS Estimate**: 0.64\n- **EPS Reported**: 0.56\n- **Surprise**: -0.0800 (-12.50%)\n\n### 2024-05-16\n- **EPS Estimate**: 0.53\n- **EPS Reported**: 0.6\n- **Surprise**: 0.0700 (+13.21%)\n\n"
+}

@@ -1,5 +1,6 @@
 import time
 import json
+from tradingagents.agents.utils.agent_utils import log_llm_start, log_llm_end
 
 # Import prompt capture utility
 try:
@@ -50,7 +51,15 @@ Debate History:
         ticker = state.get("company_of_interest", "")
         capture_agent_prompt("research_manager_report", prompt, ticker)
 
-        response = llm.invoke(prompt)
+        model_name = getattr(llm, 'model_name', 'unknown')
+        start_time = log_llm_start("JUDGE", model_name)
+        try:
+            response = llm.invoke(prompt)
+            log_llm_end("JUDGE", model_name, start_time, response)
+        except Exception as e:
+            elapsed = time.time() - start_time
+            print(f"[LLM - JUDGE] ❌ {model_name} failed after {elapsed:.2f}s: {str(e)}")
+            raise
 
         new_investment_debate_state = {
             "judge_decision": response.content,

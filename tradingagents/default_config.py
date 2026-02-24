@@ -25,6 +25,11 @@ DEFAULT_CONFIG = {
     "max_position_pct_of_buying_power": 30,  # Maximum % of buying power per trade
     "max_risk_pct_per_trade": 3,  # Maximum % account risk per trade
     "min_position_size": 100,  # Minimum position size in dollars
+    # Stop loss and take profit settings
+    "use_stop_loss": True,  # Enable stop loss orders
+    "use_take_profit": True,  # Enable take profit orders
+    "stop_loss_order_type": "stop",  # "stop" or "stop_limit"
+    "scale_out_targets": True,  # Use multiple targets to scale out
     # Execution settings
     "parallel_analysts": False,  # False = Sequential execution (more reliable), True = Parallel execution (faster)
     # Tool settings (DEPRECATED: All tools now use smart caching automatically)

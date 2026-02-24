@@ -7,7 +7,7 @@ import dash_bootstrap_components as dbc
 import dash.dependencies
 import json
 
-from webui.components.alpaca_account import render_positions_table, render_orders_table
+from webui.components.alpaca_account import render_positions_table, render_orders_table, render_account_summary
 
 
 def register_trading_callbacks(app):
@@ -15,7 +15,8 @@ def register_trading_callbacks(app):
 
     @app.callback(
         [Output("positions-table-container", "children"),
-         Output("orders-table-container", "children")],
+         Output("orders-table-container", "children"),
+         Output("account-summary-container", "children")],
         [Input("slow-refresh-interval", "n_intervals"),
          Input("refresh-btn", "n_clicks"),
          Input("refresh-alpaca-btn", "n_clicks"),
@@ -23,13 +24,13 @@ def register_trading_callbacks(app):
     )
     def update_enhanced_alpaca_tables(n_intervals, n_clicks, alpaca_refresh, orders_page):
         """Update the enhanced positions and orders tables"""
-        
+
         page = orders_page if orders_page is not None else 1
-        
+
         positions_table = render_positions_table()
         orders_table = render_orders_table(page=page)
-        
-        return positions_table, orders_table
+
+        return positions_table, orders_table, render_account_summary()
 
     @app.callback(
         [Output('liquidate-confirm', 'displayed'),

@@ -1,0 +1,9 @@
+{
+  "metadata": {
+    "function": "get_earnings_calendar",
+    "args": "('NVDA', '2026-02-01', '2026-02-28')",
+    "kwargs": "{}",
+    "cached_at": "2026-02-20T15:13:20.090640"
+  },
+  "data": "## NVDA Earnings Calendar (2026-02-01 to 2026-02-28)\n\n**Data Source:** Yahoo Finance (via yfinance)\n\n### 2026-02-25\n- **EPS Estimate**: 1.53\n- **EPS Reported**: nan\n- **Surprise**: nan (+nan%)\n\n"
+}

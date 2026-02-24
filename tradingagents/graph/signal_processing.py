@@ -1,6 +1,8 @@
 # TradingAgents/graph/signal_processing.py
 
 from langchain_openai import ChatOpenAI
+import time
+from tradingagents.agents.utils.agent_utils import log_llm_start, log_llm_end
 
 
 class SignalProcessor:
@@ -50,4 +52,13 @@ class SignalProcessor:
             ("human", full_signal),
         ]
 
-        return self.quick_thinking_llm.invoke(messages).content.strip().upper()
+        model_name = getattr(self.quick_thinking_llm, 'model_name', 'unknown')
+        start_time = log_llm_start("SIGNAL_PROCESSOR", model_name)
+        try:
+            llm_result = self.quick_thinking_llm.invoke(messages)
+            log_llm_end("SIGNAL_PROCESSOR", model_name, start_time, llm_result)
+        except Exception as e:
+            elapsed = time.time() - start_time
+            print(f"[LLM - SIGNAL_PROCESSOR] ❌ {model_name} failed after {elapsed:.2f}s: {str(e)}")
+            raise
+        return llm_result.content.strip().upper()

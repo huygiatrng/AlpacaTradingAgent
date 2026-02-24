@@ -15,10 +15,25 @@ class AppState:
         self.llm_calls_count = 0
         self.generated_reports_count = 0
         self.needs_ui_update = False
-        
+
+        # System log entries captured from stdout (for debug Logs tab)
+        self.system_logs = []
+
+        # Track user-initiated symbol selection to prevent override
+        self.last_symbol_click_time = 0  # Timestamp of last user symbol click
+
+        # Section-specific active symbol tracking for independent navigation
+        self.active_report_symbol = None  # Tracks which symbol's report is displayed
+        self.active_chart_symbol = None   # Tracks which symbol's chart is displayed
+        self.active_batch_symbol_index = 0  # Tracks batch button state (0-indexed)
+
         # Session tracking
         self.current_session_id = None
         self.session_start_time = None
+
+        # Batch configuration
+        self.batch_size = 5  # Default batch size
+        self.batch_delay = 5  # Default delay between batches
         
         # New: Proper tracking lists similar to CLI
         self.tool_calls_log = []  # Store actual tool calls for proper counting
@@ -243,9 +258,12 @@ class AppState:
         self.tool_calls_log = []
         self.llm_calls_log = []
         self.generated_reports_count = 0
+        # Reset symbol click tracking
+        self.last_symbol_click_time = 0
         # Reset session tracking
         self.current_session_id = None
         self.session_start_time = None
+        self.system_logs = []
 
     def get_tool_calls_for_display(self, agent_filter=None, symbol_filter=None):
         """Get tool calls in a consistent format for UI display, optionally filtered by agent type and symbol"""
@@ -419,7 +437,25 @@ class AppState:
         self.tool_calls_log = []
         self.llm_calls_log = []
         self.generated_reports_count = 0
+        self.system_logs = []
         self.needs_ui_update = True
+
+    def get_system_logs_for_display(self, symbol_filter=None, tag_filter=None) -> list:
+        """Get system log entries optionally filtered by symbol and/or tag."""
+        logs = self.system_logs
+        if symbol_filter and symbol_filter != "ALL":
+            logs = [e for e in logs if e.get("symbol", "").upper() == symbol_filter.upper()]
+        if tag_filter and tag_filter != "ALL":
+            logs = [e for e in logs if e.get("tag", "").upper() == tag_filter.upper()]
+        return logs
+
+    def get_unique_log_tags(self) -> list:
+        """Return sorted list of unique tag values seen in system_logs."""
+        return sorted({e["tag"] for e in self.system_logs if e.get("tag")})
+
+    def get_unique_log_symbols(self) -> list:
+        """Return sorted list of unique symbol values seen in system_logs."""
+        return sorted({e["symbol"] for e in self.system_logs if e.get("symbol")})
 
     def start_loop(self, symbols, config):
         """Start the looping mode with given symbols and configuration."""
@@ -491,16 +527,27 @@ class AppState:
                 return False
         return True
 
-    def process_chunk_updates(self, chunk):
-        """Process chunk updates from the graph stream for the symbol currently being analyzed."""
-        state = self.get_analyzing_state()
-        if not state:
-            # Fallback to current symbol if no analyzing symbol is set
-            state = self.get_current_state()
-            if not state:
-                return
+    def process_chunk_updates(self, chunk, ticker=None):
+        """
+        Process chunk updates from the graph stream for the specified symbol.
 
-        analyzing_symbol = self.analyzing_symbol or self.current_symbol
+        Args:
+            chunk: The state chunk from graph.stream()
+            ticker: Optional explicit ticker symbol (thread-safe for parallel batch mode)
+        """
+        # Use explicit ticker if provided (thread-safe for parallel execution)
+        # Otherwise fallback to shared state variables (single symbol mode)
+        analyzing_symbol = ticker or self.analyzing_symbol or self.current_symbol
+
+        if not analyzing_symbol:
+            return
+
+        state = self.symbol_states.get(analyzing_symbol)
+        if not state:
+            # Initialize state if it doesn't exist
+            self.init_symbol_state(analyzing_symbol)
+            state = self.symbol_states.get(analyzing_symbol)
+
         ui_update_needed = False
 
         # Map report types to agent names
@@ -692,23 +739,33 @@ class AppState:
                 self.update_reports_count()
                 ui_update_needed = True
             
-            # Research manager
+            # Research manager - only update if this is a NEW decision
             if "judge_decision" in debate_state and debate_state["judge_decision"]:
-                self.update_agent_status("Bull Researcher", "completed", analyzing_symbol)
-                self.update_agent_status("Bear Researcher", "completed", analyzing_symbol)
-                self.update_agent_status("Research Manager", "completed", analyzing_symbol)
-                state["current_reports"]["research_manager_report"] = debate_state["judge_decision"]
-                state["current_reports"]["investment_plan"] = debate_state["judge_decision"]
-                self.update_agent_status("Trader", "in_progress", analyzing_symbol)
-                ui_update_needed = True
+                new_decision = debate_state["judge_decision"]
+                existing_decision = state["current_reports"].get("research_manager_report", "")
+
+                # Only update status if this is actually a new decision
+                if new_decision != existing_decision:
+                    self.update_agent_status("Bull Researcher", "completed", analyzing_symbol)
+                    self.update_agent_status("Bear Researcher", "completed", analyzing_symbol)
+                    self.update_agent_status("Research Manager", "completed", analyzing_symbol)
+                    state["current_reports"]["research_manager_report"] = new_decision
+                    state["current_reports"]["investment_plan"] = new_decision
+                    self.update_agent_status("Trader", "in_progress", analyzing_symbol)
+                    ui_update_needed = True
         
-        # Trader plan
+        # Trader plan - only update if this is a NEW plan (not already stored)
         if "trader_investment_plan" in chunk and chunk["trader_investment_plan"]:
-            state["current_reports"]["trader_investment_plan"] = chunk["trader_investment_plan"]
-            self.update_reports_count()
-            self.update_agent_status("Trader", "completed", analyzing_symbol)
-            self.update_agent_status("Risky Analyst", "in_progress", analyzing_symbol)
-            ui_update_needed = True
+            new_plan = chunk["trader_investment_plan"]
+            existing_plan = state["current_reports"].get("trader_investment_plan", "")
+
+            # Only update status if this is actually a new plan
+            if new_plan != existing_plan:
+                state["current_reports"]["trader_investment_plan"] = new_plan
+                self.update_reports_count()
+                self.update_agent_status("Trader", "completed", analyzing_symbol)
+                self.update_agent_status("Risky Analyst", "in_progress", analyzing_symbol)
+                ui_update_needed = True
         
         # Risk debate state
         if "risk_debate_state" in chunk:

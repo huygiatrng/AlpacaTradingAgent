@@ -2,6 +2,8 @@
 
 from typing import Dict, Any
 from langchain_openai import ChatOpenAI
+import time
+from tradingagents.agents.utils.agent_utils import log_llm_start, log_llm_end
 
 
 class Reflector:
@@ -67,7 +69,17 @@ Adhere strictly to these instructions, and ensure your output is detailed, accur
             ),
         ]
 
-        result = self.quick_thinking_llm.invoke(messages).content
+        model_name = getattr(self.quick_thinking_llm, 'model_name', 'unknown')
+        agent_label = f"REFLECTOR_{component_name.replace(' ', '_')}"
+        start_time = log_llm_start(agent_label, model_name)
+        try:
+            llm_result = self.quick_thinking_llm.invoke(messages)
+            log_llm_end(agent_label, model_name, start_time, llm_result)
+        except Exception as e:
+            elapsed = time.time() - start_time
+            print(f"[LLM - {agent_label}] ❌ {model_name} failed after {elapsed:.2f}s: {str(e)}")
+            raise
+        result = llm_result.content
         return result
 
     def reflect_bull_researcher(self, current_state, returns_losses, bull_memory):

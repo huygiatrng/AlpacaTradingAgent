@@ -90,3 +90,12 @@ class AgentState(MessagesState):
         RiskDebateState, "Current state of the debate on evaluating risk"
     ]
     final_trade_decision: Annotated[str, "Final decision made by the Risk Analysts"]
+
+    # trade execution fields (set by trader and risk manager nodes)
+    trading_mode: Annotated[str, "Trading mode (investment or trading)"]
+    current_position: Annotated[str, "Current position state (LONG/SHORT/NEUTRAL)"]
+    recommended_action: Annotated[str, "Recommended action from trader/risk manager"]
+    recommended_position_size: Annotated[dict, "Position size recommended by trader"]
+    recommended_trading_prices: Annotated[dict, "Stop/target prices recommended by trader"]
+    approved_position_size: Annotated[dict, "Position size approved by risk manager"]
+    approved_trading_prices: Annotated[dict, "Stop/target prices approved by risk manager"]

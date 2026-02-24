@@ -1,6 +1,7 @@
 from langchain_core.messages import AIMessage
 import time
 import json
+from tradingagents.agents.utils.agent_utils import log_llm_start, log_llm_end
 
 # Import prompt capture utility
 try:
@@ -57,7 +58,15 @@ Use this information to deliver a compelling bear argument, refute the bull's cl
         ticker = state.get("company_of_interest", "")
         capture_agent_prompt("bear_report", prompt, ticker)
 
-        response = llm.invoke(prompt)
+        model_name = getattr(llm, 'model_name', 'unknown')
+        start_time = log_llm_start("BEAR", model_name)
+        try:
+            response = llm.invoke(prompt)
+            log_llm_end("BEAR", model_name, start_time, response)
+        except Exception as e:
+            elapsed = time.time() - start_time
+            print(f"[LLM - BEAR] ❌ {model_name} failed after {elapsed:.2f}s: {str(e)}")
+            raise
 
         argument = f"Bear Analyst: {response.content}"
 

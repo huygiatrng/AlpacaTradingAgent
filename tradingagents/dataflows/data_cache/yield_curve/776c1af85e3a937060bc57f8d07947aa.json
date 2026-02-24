@@ -1,0 +1,9 @@
+{
+  "metadata": {
+    "function": "get_yield_curve_analysis",
+    "args": "('2026-02-03',)",
+    "kwargs": "{}",
+    "cached_at": "2026-02-03T15:09:24.565068"
+  },
+  "data": "## Treasury Yield Curve as of 2026-02-03\n\n| Maturity | Yield (%) | Date |\n|----------|-----------|------|\n| 1 Month | 3.72% | 2026-01-30 |\n| 3 Month | 3.67% | 2026-01-30 |\n| 6 Month | 3.61% | 2026-01-30 |\n| 1 Year | 3.48% | 2026-01-30 |\n| 2 Year | 3.52% | 2026-01-30 |\n| 3 Year | 3.60% | 2026-01-30 |\n| 5 Year | 3.79% | 2026-01-30 |\n| 7 Year | 4.01% | 2026-01-30 |\n| 10 Year | 4.26% | 2026-01-30 |\n| 20 Year | 4.82% | 2026-01-30 |\n| 30 Year | 4.87% | 2026-01-30 |\n\n### Yield Curve Analysis\n- **2Y-10Y Spread**: 0.74 basis points\n- **\ud83d\udcca FLAT YIELD CURVE**: Economic uncertainty\n"
+}

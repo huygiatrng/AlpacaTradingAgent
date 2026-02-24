@@ -3,6 +3,7 @@ import time
 import json
 from ..utils.agent_trading_modes import get_trading_mode_context, get_agent_specific_context, extract_recommendation, format_final_decision
 from tradingagents.dataflows.alpaca_utils import AlpacaUtils
+from tradingagents.agents.utils.agent_utils import log_llm_start, log_llm_end
 
 # Import prompt capture utility
 try:
@@ -152,6 +153,36 @@ Consider:
 - Entry price level
 - Risk tolerance (max 3% of account equity)
 
+**TRADING PRICES OUTPUT REQUIREMENT:**
+You MUST provide specific price levels in the following EXACT format for automated extraction:
+
+Entry Price: $XXX.XX
+Stop Loss: $XXX.XX
+Target 1: $XXX.XX
+Target 2: $XXX.XX
+
+**CRITICAL FORMATTING RULES:**
+1. Use the exact labels: "Entry Price:", "Stop Loss:", "Target 1:", "Target 2:"
+2. Include the dollar sign and exactly 2 decimal places
+3. These must be actual numeric prices, not ranges or approximations
+4. **FOR LONG POSITIONS:** Stop Loss must be BELOW Entry Price, Targets must be ABOVE Entry Price
+5. **FOR SHORT POSITIONS:** Stop Loss must be ABOVE Entry Price (to limit losses), Targets must be BELOW Entry Price (to lock profits)
+6. Base prices on technical levels (support/resistance), not arbitrary percentages
+
+**Example Format (LONG position):**
+Entry Price: $337.20
+Stop Loss: $325.50  (below entry - limits downside)
+Target 1: $350.00  (above entry - profit taking)
+Target 2: $365.00  (above entry - extended profit)
+
+**Example Format (SHORT position):**
+Entry Price: $337.20
+Stop Loss: $350.00  (above entry - limits upside risk)
+Target 1: $320.00  (below entry - profit taking)
+Target 2: $310.00  (below entry - extended profit)
+
+This section must appear BEFORE your final RECOMMENDED POSITION SIZE conclusion.
+
 You MUST conclude with:
 RECOMMENDED POSITION SIZE: $X,XXX
 (Reasoning: explain your sizing logic based on risk and volatility)
@@ -244,7 +275,15 @@ USER MESSAGE:
             # Fallback to system message only
             capture_agent_prompt("trader_investment_plan", messages[0]["content"], company_name)
 
-        result = llm.invoke(messages)
+        model_name = getattr(llm, 'model_name', 'unknown')
+        start_time = log_llm_start("TRADER", model_name)
+        try:
+            result = llm.invoke(messages)
+            log_llm_end("TRADER", model_name, start_time, result)
+        except Exception as e:
+            elapsed = time.time() - start_time
+            print(f"[LLM - TRADER] ❌ {model_name} failed after {elapsed:.2f}s: {str(e)}")
+            raise
 
         # Enhanced validation and final proposal handling
         analysis_content = result.content if hasattr(result, 'content') else str(result)
@@ -264,8 +303,16 @@ USER MESSAGE:
 Include detailed reasoning for EOD trading decisions and conclude with a clear recommendation.
 
 Focus on actionable insights with specific price levels and risk parameters."""
-            
-            fallback_result = llm.invoke(fallback_prompt)
+
+            model_name = getattr(llm, 'model_name', 'unknown')
+            start_time = log_llm_start("TRADER", model_name)
+            try:
+                fallback_result = llm.invoke(fallback_prompt)
+                log_llm_end("TRADER", model_name, start_time, fallback_result)
+            except Exception as e:
+                elapsed = time.time() - start_time
+                print(f"[LLM - TRADER] ❌ {model_name} failed after {elapsed:.2f}s: {str(e)}")
+                raise
             analysis_content = fallback_result.content if hasattr(fallback_result, 'content') else str(fallback_result)
         
         # Ensure we have a final recommendation
@@ -277,8 +324,16 @@ Analysis:
 {analysis_content}
 
 Provide a brief justification and conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**"""
-            
-            final_result = llm.invoke(final_prompt)
+
+            model_name = getattr(llm, 'model_name', 'unknown')
+            start_time = log_llm_start("TRADER", model_name)
+            try:
+                final_result = llm.invoke(final_prompt)
+                log_llm_end("TRADER", model_name, start_time, final_result)
+            except Exception as e:
+                elapsed = time.time() - start_time
+                print(f"[LLM - TRADER] ❌ {model_name} failed after {elapsed:.2f}s: {str(e)}")
+                raise
             final_content = final_result.content if hasattr(final_result, 'content') else str(final_result)
             
             # Properly combine analysis with final proposal
@@ -294,11 +349,35 @@ Provide a brief justification and conclude with: FINAL TRANSACTION PROPOSAL: **B
 
         # Extract position size recommendation from trader's analysis
         from tradingagents.agents.utils.position_size_extractor import extract_position_size
+        from tradingagents.agents.utils.price_extractor import extract_trading_prices
 
         trader_position_size = extract_position_size(
             result.content,
             account_info={"equity": equity, "buying_power": buying_power, "cash": cash}
         )
+
+        # Get current price for validation
+        current_price = None
+        try:
+            quote = AlpacaUtils.get_latest_quote(company_name)
+            current_price = quote.get("ask_price") or quote.get("bid_price")
+            print(f"[TRADER] Current market price for {company_name}: ${current_price:.2f}")
+        except Exception as e:
+            print(f"[TRADER] ⚠️ Could not get current price for {company_name}: {e}")
+
+        # Extract trading prices from trader's analysis
+        print(f"[TRADER] Extracting trading prices from trader analysis for {company_name}...")
+        trading_prices = extract_trading_prices(
+            result.content,
+            current_price=current_price
+        )
+
+        if trading_prices.get("fallback_used"):
+            print(f"[TRADER] ⚠️ Price extraction failed - trader did not specify stop/target prices")
+        else:
+            print(f"[TRADER] ✅ Extracted prices from trader:")
+            print(f"[TRADER]   Stop Loss: ${trading_prices.get('stop_loss'):.2f}" if trading_prices.get('stop_loss') else "[TRADER]   Stop Loss: Not found")
+            print(f"[TRADER]   Targets: {[f'${t:.2f}' for t in trading_prices.get('targets', [])]}" if trading_prices.get('targets') else "[TRADER]   Targets: Not found")
 
         # Format the final decision while preserving full analysis
         if extracted_recommendation:
@@ -319,7 +398,8 @@ Provide a brief justification and conclude with: FINAL TRANSACTION PROPOSAL: **B
             "trading_mode": trading_mode,
             "current_position": current_position,
             "recommended_action": extracted_recommendation,
-            "recommended_position_size": trader_position_size,  # NEW
+            "recommended_position_size": trader_position_size,
+            "recommended_trading_prices": trading_prices,  # NEW
         }
 
     return functools.partial(trader_node, name="Trader")

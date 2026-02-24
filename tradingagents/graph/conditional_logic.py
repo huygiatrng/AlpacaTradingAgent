@@ -64,18 +64,27 @@ class ConditionalLogic:
 
     def should_continue_risk_analysis(self, state: AgentState) -> str:
         """Determine if risk analysis should continue."""
-        if (
-            state["risk_debate_state"]["count"] >= 3 * self.max_risk_discuss_rounds
-        ):  # 3 rounds of back-and-forth between 3 agents
+        count = state["risk_debate_state"]["count"]
+        max_count = 3 * self.max_risk_discuss_rounds
+        latest_speaker = state["risk_debate_state"].get("latest_speaker", "Unknown")
+
+        print(f"[RISK CONDITIONAL] count={count}, max={max_count}, latest_speaker={latest_speaker}")
+
+        if count >= max_count:
+            print(f"[RISK CONDITIONAL] ✅ Debate complete ({count} >= {max_count}), routing to Risk Judge")
             return "Risk Judge"
-            
+
         # Check if latest_speaker exists in the state, if not initialize it
         if "latest_speaker" not in state["risk_debate_state"]:
             # Default to Risky Analyst as the first speaker
             state["risk_debate_state"]["latest_speaker"] = "Risky"
-            
-        if state["risk_debate_state"]["latest_speaker"].startswith("Risky"):
+            latest_speaker = "Risky"
+
+        if latest_speaker.startswith("Risky"):
+            print(f"[RISK CONDITIONAL] Risky completed, routing to Safe Analyst")
             return "Safe Analyst"
-        if state["risk_debate_state"]["latest_speaker"].startswith("Safe"):
+        if latest_speaker.startswith("Safe"):
+            print(f"[RISK CONDITIONAL] Safe completed, routing to Neutral Analyst")
             return "Neutral Analyst"
+        print(f"[RISK CONDITIONAL] Neutral completed, routing to Risky Analyst (round continues)")
         return "Risky Analyst"

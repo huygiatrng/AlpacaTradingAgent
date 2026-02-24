@@ -1,0 +1,9 @@
+{
+  "metadata": {
+    "function": "get_earnings_calendar",
+    "args": "('GOOGL', '2025-11-01', '2026-03-31')",
+    "kwargs": "{}",
+    "cached_at": "2026-02-06T16:11:32.311775"
+  },
+  "data": "## GOOGL Earnings Calendar (2025-11-01 to 2026-03-31)\n\n**Data Source:** Yahoo Finance (via yfinance)\n\n### 2026-02-04\n- **EPS Estimate**: 2.64\n- **EPS Reported**: 2.82\n- **Surprise**: 0.1800 (+6.82%)\n\n"
+}

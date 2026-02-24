@@ -5,15 +5,125 @@ Control and configuration callbacks for TradingAgents WebUI
 from dash import Input, Output, State, ctx, html
 import dash_bootstrap_components as dbc
 import dash
+import math
 import threading
 import time
+import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from webui.utils.state import app_state
 from webui.components.analysis import start_analysis
 
 
+def process_symbols_in_parallel_batches(
+    symbols_list,
+    analysts_market, analysts_social, analysts_news, analysts_fundamentals, analysts_macro,
+    research_depth, allow_shorts, quick_llm, deep_llm, parallel_execution,
+    batch_size=5,
+    batch_delay=5,
+    stop_condition=None
+):
+    """
+    Process a list of symbols in parallel batches.
+
+    Args:
+        symbols_list: List of ticker symbols to analyze
+        batch_size: Number of symbols to process in parallel (default: 5)
+        batch_delay: Seconds to wait between batches (default: 5)
+        stop_condition: Optional callable that returns True to stop processing
+        Other args: Analysis configuration parameters
+    """
+    total_symbols = len(symbols_list)
+    total_batches = math.ceil(total_symbols / batch_size)
+    # Use enough threads so all batches can run concurrently
+    all_futures = {}
+
+    with ThreadPoolExecutor(max_workers=total_symbols) as executor:
+        for batch_idx in range(0, total_symbols, batch_size):
+            if stop_condition and stop_condition():
+                print("[PARALLEL_BATCH] Stop condition triggered, halting analysis")
+                break
+
+            batch = symbols_list[batch_idx:batch_idx + batch_size]
+            batch_num = (batch_idx // batch_size) + 1
+
+            print(f"[PARALLEL_BATCH] Starting batch {batch_num}/{total_batches}: {batch}")
+
+            for idx, symbol in enumerate(batch):
+                print(f"[PARALLEL_BATCH] Submitting {symbol} (#{idx+1}/{len(batch)})")
+                future = executor.submit(
+                    start_analysis,
+                    symbol,
+                    analysts_market, analysts_social, analysts_news,
+                    analysts_fundamentals, analysts_macro,
+                    research_depth, allow_shorts, quick_llm, deep_llm,
+                    parallel_execution
+                )
+                all_futures[future] = symbol
+
+            print(f"[PARALLEL_BATCH] Batch {batch_num} submitted ({len(batch)} symbols)")
+
+            # Sleep BEFORE submitting the next batch to stagger starts
+            if batch_idx + batch_size < total_symbols:
+                if stop_condition and stop_condition():
+                    print("[PARALLEL_BATCH] Stop condition triggered during delay")
+                    break
+                print(f"[PARALLEL_BATCH] Waiting {batch_delay}s before next batch...")
+                time.sleep(batch_delay)
+
+        # Wait for all submitted futures to complete
+        for future in as_completed(all_futures):
+            symbol = all_futures[future]
+            try:
+                future.result()
+                print(f"[PARALLEL_BATCH] Completed {symbol}")
+            except Exception as e:
+                print(f"[PARALLEL_BATCH] Error analyzing {symbol}: {e}")
+                traceback.print_exc()
+
+    print(f"[PARALLEL_BATCH] All batches completed for {total_symbols} symbols")
+
+
 def register_control_callbacks(app):
     """Register all control and configuration callbacks"""
+
+    @app.callback(
+        Output("batch-config-info", "children"),
+        [Input("batch-size", "value"),
+         Input("batch-delay", "value")]
+    )
+    def update_batch_config_info(batch_size, batch_delay):
+        """Update the batch configuration information display"""
+        if not batch_size or batch_size < 1:
+            batch_size = 5
+        if batch_delay is None or batch_delay < 0:
+            batch_delay = 5
+
+        return dbc.Card([
+            dbc.CardHeader([
+                html.H6("Parallel Batch Processing",
+                       className="mb-0",
+                       style={"fontWeight": "bold", "color": "white"})
+            ], style={"backgroundColor": "#17a2b8", "border": "none"}),
+            dbc.CardBody([
+                html.P([
+                    html.Strong("Description: ", style={"color": "black"}),
+                    html.Span(f"Processes {batch_size} ticker(s) simultaneously, then waits {batch_delay}s before starting the next batch", style={"color": "black"})
+                ], className="mb-2"),
+                html.P([
+                    html.Strong("Benefits:", style={"color": "black"}),
+                    html.Ul([
+                        html.Li(f"{batch_size}x faster than sequential processing per batch", style={"color": "black"}),
+                        html.Li("Respects API rate limits with delays between batches", style={"color": "black"}),
+                        html.Li("Reduces total analysis time for multiple symbols", style={"color": "black"})
+                    ], className="mb-1")
+                ], className="mb-2"),
+                html.P([
+                    html.Strong("Example: ", style={"color": "black"}),
+                    html.Span(f"15 tickers = 3 batches of {batch_size}, taking ~{(3-1)*batch_delay}s of delays + analysis time", style={"color": "black"})
+                ], className="mb-0")
+            ], style={"backgroundColor": "#d1ecf1"})
+        ])
 
     @app.callback(
         Output("research-depth-info", "children"),
@@ -513,14 +623,21 @@ def register_control_callbacks(app):
          State("trade-after-analyze", "value"),
          State("trade-dollar-amount", "value"),
          State("ai-position-sizing", "value"),
+         State("use-stop-loss", "value"),
+         State("use-take-profit", "value"),
+         State("use-bracket-orders", "value"),
          State("market-hour-enabled", "value"),
          State("market-hours-input", "value"),
-         State("parallel-execution", "value")]
+         State("parallel-execution", "value"),
+         State("batch-size", "value"),
+         State("batch-delay", "value")]
     )
     def on_control_button_click(n_clicks, button_children, tickers, analysts_market, analysts_social, analysts_news,
                                analysts_fundamentals, analysts_macro, research_depth, quick_llm, deep_llm,
                                allow_shorts, loop_enabled, loop_interval, trade_enabled, trade_amount, use_ai_sizing,
-                               market_hour_enabled, market_hours_input, parallel_execution):
+                               use_stop_loss, use_take_profit, use_bracket_orders,
+                               market_hour_enabled, market_hours_input, parallel_execution,
+                               batch_size, batch_delay):
         """Handle control button clicks"""
         # Detect which property triggered this callback
         triggered_prop = None
@@ -583,7 +700,10 @@ def register_control_callbacks(app):
         app_state.trade_enabled = trade_enabled
         app_state.trade_amount = trade_amount if trade_amount and trade_amount > 0 else 1000
         app_state.use_ai_sizing = use_ai_sizing if use_ai_sizing is not None else True  # Default to True
-        
+        app_state.use_stop_loss = use_stop_loss if use_stop_loss is not None else True  # Default to True
+        app_state.use_take_profit = use_take_profit if use_take_profit is not None else True  # Default to True
+        app_state.use_bracket_orders = use_bracket_orders if use_bracket_orders is not None else False
+
         # Validate market hour configuration if enabled
         if market_hour_enabled:
             from webui.utils.market_hours import validate_market_hours
@@ -592,6 +712,16 @@ def register_control_callbacks(app):
                 return f"Invalid market hours: {error_msg}", {}, 1, 1, 1, 1
         
         num_symbols = len(symbols)
+
+        # Validate and set defaults for batch configuration
+        if not batch_size or batch_size < 1:
+            batch_size = 5
+        if batch_delay is None or batch_delay < 0:
+            batch_delay = 5
+
+        # Store in app_state for access by other callbacks
+        app_state.batch_size = batch_size
+        app_state.batch_delay = batch_delay
 
         # Initialize symbol states IMMEDIATELY so pagination works right away
         for symbol in symbols:
@@ -649,30 +779,24 @@ def register_control_callbacks(app):
                         continue
                     
                     print(f"[MARKET_HOUR] Market is open, starting analysis at {next_hour}:00")
-                    
+
                     # Reset states for new analysis
                     app_state.reset_for_loop()
-                    
+
                     # Initialize symbol states
                     for symbol in symbols:
                         app_state.init_symbol_state(symbol)
-                    
-                    # Add symbols to queue and run analysis
-                    app_state.add_symbols_to_queue(symbols)
-                    
-                    while app_state.analysis_queue and not app_state.stop_market_hour:
-                        symbol = app_state.get_next_symbol()
-                        if symbol:
-                            print(f"[MARKET_HOUR] Analyzing {symbol} at {next_hour}:00 with current market data...")
-                            start_analysis(
-                                symbol,
-                                analysts_market, analysts_social, analysts_news, analysts_fundamentals, analysts_macro,
-                                research_depth, allow_shorts, quick_llm, deep_llm, parallel_execution
-                            )
-                            
-                            if app_state.stop_market_hour:
-                                break
-                    
+
+                    # Run analysis with parallel batch processing
+                    process_symbols_in_parallel_batches(
+                        symbols,
+                        analysts_market, analysts_social, analysts_news, analysts_fundamentals, analysts_macro,
+                        research_depth, allow_shorts, quick_llm, deep_llm, parallel_execution,
+                        batch_size=batch_size,
+                        batch_delay=batch_delay,
+                        stop_condition=lambda: app_state.stop_market_hour
+                    )
+
                     if not app_state.stop_market_hour:
                         print(f"[MARKET_HOUR] Analysis completed for {next_hour}:00. Waiting for next execution time.")
             
@@ -697,21 +821,17 @@ def register_control_callbacks(app):
                 loop_iteration = 1
                 while not app_state.stop_loop:
                     print(f"[LOOP] Starting iteration {loop_iteration}")
-                    
-                    # States already initialized above, just add to queue
-                    app_state.add_symbols_to_queue(symbols)
-                    
-                    # Run analysis for all symbols
-                    while app_state.analysis_queue and not app_state.stop_loop:
-                        symbol = app_state.get_next_symbol()
-                        if symbol:
-                            print(f"[LOOP] Analyzing {symbol} with current market data...")
-                            start_analysis(
-                                symbol,
-                                analysts_market, analysts_social, analysts_news, analysts_fundamentals, analysts_macro,
-                                research_depth, allow_shorts, quick_llm, deep_llm, parallel_execution
-                            )
-                    
+
+                    # Run analysis for all symbols with parallel batch processing
+                    process_symbols_in_parallel_batches(
+                        symbols,
+                        analysts_market, analysts_social, analysts_news, analysts_fundamentals, analysts_macro,
+                        research_depth, allow_shorts, quick_llm, deep_llm, parallel_execution,
+                        batch_size=batch_size,
+                        batch_delay=batch_delay,
+                        stop_condition=lambda: app_state.stop_loop
+                    )
+
                     if app_state.stop_loop:
                         break
                     
@@ -731,20 +851,17 @@ def register_control_callbacks(app):
                 
                 print("[LOOP] Loop stopped")
             else:
-                # Single run mode (original behavior) - use current date
-                # States already initialized above, just add to queue
-                app_state.add_symbols_to_queue(symbols)
+                # Single run mode with parallel batch processing
+                print(f"[SINGLE] Starting parallel batch analysis for {len(symbols)} symbols (batch_size={batch_size}, batch_delay={batch_delay}s)")
+                process_symbols_in_parallel_batches(
+                    symbols,
+                    analysts_market, analysts_social, analysts_news, analysts_fundamentals, analysts_macro,
+                    research_depth, allow_shorts, quick_llm, deep_llm, parallel_execution,
+                    batch_size=batch_size,
+                    batch_delay=batch_delay,
+                    stop_condition=None
+                )
 
-                while app_state.analysis_queue:
-                    symbol = app_state.get_next_symbol()
-                    if symbol:
-                        print(f"[SINGLE] Analyzing {symbol} with current market data...")
-                        start_analysis(
-                            symbol,
-                            analysts_market, analysts_social, analysts_news, analysts_fundamentals, analysts_macro,
-                            research_depth, allow_shorts, quick_llm, deep_llm, parallel_execution
-                        )
-            
             app_state.analysis_running = False
 
         if not app_state.analysis_running:

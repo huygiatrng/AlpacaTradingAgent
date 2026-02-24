@@ -8,3 +8,7 @@ eval_data/
 *.egg-info/
 .env
 data/
+venv/
+.claude/
+.serena/
+CLAUDE.md

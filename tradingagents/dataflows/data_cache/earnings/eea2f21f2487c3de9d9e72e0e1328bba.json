@@ -1,0 +1,9 @@
+{
+  "metadata": {
+    "function": "get_earnings_calendar",
+    "args": "('AAPL', '2025-11-01', '2026-02-21')",
+    "kwargs": "{}",
+    "cached_at": "2026-02-20T16:43:58.914734"
+  },
+  "data": "## AAPL Earnings Calendar (2025-11-01 to 2026-02-21)\n\n**Data Source:** Yahoo Finance (via yfinance)\n\n### 2026-01-29\n- **EPS Estimate**: 2.67\n- **EPS Reported**: 2.84\n- **Surprise**: 0.1700 (+6.37%)\n\n"
+}

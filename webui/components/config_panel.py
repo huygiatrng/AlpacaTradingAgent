@@ -98,6 +98,38 @@ def create_config_panel():
                     html.Div(id="parallel-execution-info", className="mb-3"),
                 ], width=6),
             ]),
+            html.H5("Parallel Batch Configuration:", className="mt-3"),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Label("Batch Size (symbols per batch)", className="mb-1"),
+                    dbc.Input(
+                        id="batch-size",
+                        type="number",
+                        placeholder="5",
+                        value=5,
+                        min=1,
+                        max=20,
+                        className="mb-2"
+                    ),
+                ], width=6),
+                dbc.Col([
+                    dbc.Label("Batch Delay (seconds between batches)", className="mb-1"),
+                    dbc.Input(
+                        id="batch-delay",
+                        type="number",
+                        placeholder="5",
+                        value=5,
+                        min=0,
+                        max=60,
+                        className="mb-2"
+                    ),
+                ], width=6),
+            ]),
+            dbc.Row([
+                dbc.Col([
+                    html.Div(id="batch-config-info", className="mb-3"),
+                ], width=12),
+            ]),
             html.H5("Scheduling Configuration:", className="mt-3"),
             dbc.Row([
                 dbc.Col([
@@ -185,6 +217,44 @@ def create_config_panel():
             ]),
             # Add trading mode information display
             html.Div(id="trade-after-analyze-info", className="mb-3"),
+
+            # Order Protection Settings
+            html.H5("Order Protection:", className="mt-3"),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Switch(
+                        id="use-stop-loss",
+                        label="Use Stop Loss Orders",
+                        value=True,  # Default enabled
+                        className="mb-2"
+                    ),
+                    html.Small("Place automatic stop loss orders based on AI analysis", className="text-muted d-block mb-2"),
+                ], width=6),
+                dbc.Col([
+                    dbc.Switch(
+                        id="use-take-profit",
+                        label="Use Take Profit Orders",
+                        value=True,  # Default enabled
+                        className="mb-2"
+                    ),
+                    html.Small("Place automatic take profit orders based on AI analysis", className="text-muted d-block mb-2"),
+                ], width=6),
+            ]),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Switch(
+                        id="use-bracket-orders",
+                        label="Use Native Bracket Orders",
+                        value=False,
+                        className="mb-2"
+                    ),
+                    html.Small(
+                        "Atomic entry + stop + target in one order (uses T1 only, no T2 scale-out)",
+                        className="text-muted d-block mb-3"
+                    ),
+                ], width=12),
+            ]),
+
             html.H5("LLM Quick Thinker Model:", className="mt-3"),
             dbc.Select(
                 id="quick-llm",

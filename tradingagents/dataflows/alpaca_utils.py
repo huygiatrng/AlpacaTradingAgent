@@ -9,9 +9,19 @@ from alpaca.data.requests import StockBarsRequest, CryptoBarsRequest, StockLates
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from alpaca.data.enums import DataFeed
 from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import GetAssetsRequest, GetOrdersRequest, MarketOrderRequest, ClosePositionRequest
-from alpaca.trading.enums import AssetClass, OrderSide, TimeInForce
+from alpaca.trading.requests import (
+    GetAssetsRequest,
+    GetOrdersRequest,
+    MarketOrderRequest,
+    ClosePositionRequest,
+    LimitOrderRequest,
+    StopOrderRequest,
+    StopLossRequest,
+    TakeProfitRequest
+)
+from alpaca.trading.enums import AssetClass, OrderSide, TimeInForce, OrderClass
 from .config import get_api_key
+from .alpaca_exceptions import AlpacaAuthError
 
 
 # Fallback dictionary for company names
@@ -85,7 +95,12 @@ def get_alpaca_trading_client() -> TradingClient:
     api_secret = get_api_key("alpaca_secret_key", "ALPACA_SECRET_KEY")
     if not api_key or not api_secret:
         raise ValueError("Alpaca API key or secret not found. Please set ALPACA_API_KEY and ALPACA_SECRET_KEY.")
-    return TradingClient(api_key, api_secret, paper=True)
+
+    # Respect ALPACA_USE_PAPER environment variable
+    use_paper_str = get_api_key("alpaca_use_paper", "ALPACA_USE_PAPER")
+    use_paper = use_paper_str.lower() == "true" if use_paper_str else True  # Default to True
+
+    return TradingClient(api_key, api_secret, paper=use_paper)
 
 
 def _parse_timeframe(tf: Union[str, TimeFrame]) -> TimeFrame:
@@ -288,7 +303,7 @@ class AlpacaUtils:
         try:
             client = get_alpaca_trading_client()
             positions = client.get_all_positions()
-            
+
             # Convert positions to a list of dictionaries
             positions_data = []
             for position in positions:
@@ -297,13 +312,13 @@ class AlpacaUtils:
                 qty = float(position.qty)
                 market_value = float(position.market_value)
                 cost_basis = avg_entry_price * qty
-                
+
                 # Calculate P/L values
                 today_pl_dollars = float(position.unrealized_intraday_pl)
                 total_pl_dollars = float(position.unrealized_pl)
                 today_pl_percent = (today_pl_dollars / cost_basis) * 100 if cost_basis != 0 else 0
                 total_pl_percent = (total_pl_dollars / cost_basis) * 100 if cost_basis != 0 else 0
-                
+
                 positions_data.append({
                     "Symbol": position.symbol,
                     "Qty": qty,
@@ -315,9 +330,16 @@ class AlpacaUtils:
                     "Total P/L (%)": f"{total_pl_percent:.2f}%",
                     "Total P/L ($)": f"${total_pl_dollars:.2f}"
                 })
-            
+
             return positions_data
         except Exception as e:
+            # Check if this is an authentication error
+            error_str = str(e).lower()
+            if any(keyword in error_str for keyword in ["unauthorized", "401", "403", "api key", "authentication"]):
+                print(f"[ALPACA AUTH ERROR] {e}")
+                raise AlpacaAuthError(f"Alpaca authentication failed. Please check your API keys: {e}")
+
+            # For other errors, log and return empty list
             print(f"Error fetching positions: {e}")
             return []
 
@@ -353,6 +375,13 @@ class AlpacaUtils:
             return orders_data[start : start + page_size]
 
         except Exception as e:
+            # Check if this is an authentication error
+            error_str = str(e).lower()
+            if any(keyword in error_str for keyword in ["unauthorized", "401", "403", "api key", "authentication"]):
+                print(f"[ALPACA AUTH ERROR] {e}")
+                raise AlpacaAuthError(f"Alpaca authentication failed. Please check your API keys: {e}")
+
+            # For other errors, log and return empty list
             print(f"Error fetching orders: {e}")
             return []
 
@@ -362,17 +391,17 @@ class AlpacaUtils:
         try:
             client = get_alpaca_trading_client()
             account = client.get_account()
-            
+
             # Extract the required values
             buying_power = float(account.buying_power)
             cash = float(account.cash)
-            
+
             # Calculate daily change
             equity = float(account.equity)
             last_equity = float(account.last_equity)
             daily_change_dollars = equity - last_equity
             daily_change_percent = (daily_change_dollars / last_equity) * 100 if last_equity != 0 else 0
-            
+
             return {
                 "buying_power": buying_power,
                 "cash": cash,
@@ -380,6 +409,13 @@ class AlpacaUtils:
                 "daily_change_percent": daily_change_percent
             }
         except Exception as e:
+            # Check if this is an authentication error
+            error_str = str(e).lower()
+            if any(keyword in error_str for keyword in ["unauthorized", "401", "403", "api key", "authentication"]):
+                print(f"[ALPACA AUTH ERROR] {e}")
+                raise AlpacaAuthError(f"Alpaca authentication failed. Please check your API keys: {e}")
+
+            # For other errors, log and return safe defaults
             print(f"Error fetching account info: {e}")
             return {
                 "buying_power": 0,
@@ -549,21 +585,274 @@ class AlpacaUtils:
             return {"success": False, "error": error_msg}
 
     @staticmethod
-    def execute_trading_action(symbol: str, current_position: str, signal: str, 
-                             dollar_amount: float, allow_shorts: bool = False) -> dict:
+    def place_stop_loss_order(symbol: str, qty: int, stop_price: float) -> dict:
+        """
+        Place a stop loss order (sell if price drops to stop_price).
+
+        Args:
+            symbol: Ticker symbol
+            qty: Number of shares
+            stop_price: Trigger price for stop loss
+
+        Returns:
+            dict with success, order_id, message
+        """
+        try:
+            client = get_alpaca_trading_client()
+            is_crypto = "/" in symbol.upper()
+
+            # Normalize symbol for Alpaca
+            alpaca_symbol = symbol.upper().replace("/", "")
+
+            time_in_force = TimeInForce.GTC if is_crypto else TimeInForce.DAY
+
+            order_data = StopOrderRequest(
+                symbol=alpaca_symbol,
+                qty=qty,
+                side=OrderSide.SELL,
+                time_in_force=time_in_force,
+                stop_price=stop_price
+            )
+
+            order = client.submit_order(order_data)
+
+            return {
+                "success": True,
+                "order_id": str(order.id),
+                "symbol": symbol,
+                "qty": qty,
+                "stop_price": stop_price,
+                "message": f"Stop loss order placed at ${stop_price:.2f}"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    @staticmethod
+    def place_limit_sell_order(symbol: str, qty: int, limit_price: float) -> dict:
+        """
+        Place a limit sell order (take profit at limit_price).
+
+        Args:
+            symbol: Ticker symbol
+            qty: Number of shares
+            limit_price: Price to sell at
+
+        Returns:
+            dict with success, order_id, message
+        """
+        try:
+            client = get_alpaca_trading_client()
+            is_crypto = "/" in symbol.upper()
+
+            # Normalize symbol for Alpaca
+            alpaca_symbol = symbol.upper().replace("/", "")
+
+            time_in_force = TimeInForce.GTC if is_crypto else TimeInForce.DAY
+
+            order_data = LimitOrderRequest(
+                symbol=alpaca_symbol,
+                qty=qty,
+                side=OrderSide.SELL,
+                time_in_force=time_in_force,
+                limit_price=limit_price
+            )
+
+            order = client.submit_order(order_data)
+
+            return {
+                "success": True,
+                "order_id": str(order.id),
+                "symbol": symbol,
+                "qty": qty,
+                "limit_price": limit_price,
+                "message": f"Limit sell order placed at ${limit_price:.2f}"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    @staticmethod
+    def place_stop_loss_order_short(symbol: str, qty: int, stop_price: float) -> dict:
+        """
+        Place a stop loss order for SHORT positions (buy if price rises to stop_price).
+
+        Args:
+            symbol: Ticker symbol
+            qty: Number of shares (positive)
+            stop_price: Trigger price for stop loss (higher than entry)
+
+        Returns:
+            dict with success, order_id, message
+        """
+        try:
+            client = get_alpaca_trading_client()
+            is_crypto = "/" in symbol.upper()
+
+            # Normalize symbol for Alpaca
+            alpaca_symbol = symbol.upper().replace("/", "")
+
+            time_in_force = TimeInForce.GTC if is_crypto else TimeInForce.DAY
+
+            order_data = StopOrderRequest(
+                symbol=alpaca_symbol,
+                qty=qty,
+                side=OrderSide.BUY,  # BUY to cover short position
+                time_in_force=time_in_force,
+                stop_price=stop_price
+            )
+
+            order = client.submit_order(order_data)
+
+            return {
+                "success": True,
+                "order_id": str(order.id),
+                "symbol": symbol,
+                "qty": qty,
+                "stop_price": stop_price,
+                "message": f"Stop loss order (short) placed at ${stop_price:.2f}"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    @staticmethod
+    def place_limit_buy_order(symbol: str, qty: int, limit_price: float) -> dict:
+        """
+        Place a limit buy order (take profit for shorts at limit_price).
+
+        Args:
+            symbol: Ticker symbol
+            qty: Number of shares
+            limit_price: Price to buy at (for closing shorts)
+
+        Returns:
+            dict with success, order_id, message
+        """
+        try:
+            client = get_alpaca_trading_client()
+            is_crypto = "/" in symbol.upper()
+
+            # Normalize symbol for Alpaca
+            alpaca_symbol = symbol.upper().replace("/", "")
+
+            time_in_force = TimeInForce.GTC if is_crypto else TimeInForce.DAY
+
+            order_data = LimitOrderRequest(
+                symbol=alpaca_symbol,
+                qty=qty,
+                side=OrderSide.BUY,  # BUY to close short position at profit
+                time_in_force=time_in_force,
+                limit_price=limit_price
+            )
+
+            order = client.submit_order(order_data)
+
+            return {
+                "success": True,
+                "order_id": str(order.id),
+                "symbol": symbol,
+                "qty": qty,
+                "limit_price": limit_price,
+                "message": f"Limit buy order placed at ${limit_price:.2f}"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    @staticmethod
+    def place_bracket_order(symbol: str, side: str = "buy", qty: int = None, notional: float = None,
+                           stop_loss: float = None, take_profit: float = None) -> dict:
+        """
+        Place a bracket order: entry market order with stop loss and take profit.
+
+        Args:
+            symbol: Ticker symbol
+            side: Order side ("buy" for long, "sell" for short)
+            qty: Shares (for stocks)
+            notional: Dollar amount (for crypto/fractional)
+            stop_loss: Stop loss price
+            take_profit: Take profit price (T1 only; T2 scale-out not supported in bracket mode)
+
+        Returns:
+            dict with success, entry_order_id, stop_order_id, profit_order_id
+        """
+        try:
+            client = get_alpaca_trading_client()
+            is_crypto = "/" in symbol.upper()
+
+            # Normalize symbol for Alpaca
+            alpaca_symbol = symbol.upper().replace("/", "")
+
+            time_in_force = TimeInForce.GTC if is_crypto else TimeInForce.DAY
+
+            # Build bracket order request
+            order_data = MarketOrderRequest(
+                symbol=alpaca_symbol,
+                qty=qty,
+                notional=notional,
+                side=OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL,
+                time_in_force=time_in_force,
+                order_class=OrderClass.BRACKET,
+                stop_loss=StopLossRequest(stop_price=stop_loss) if stop_loss else None,
+                take_profit=TakeProfitRequest(limit_price=take_profit) if take_profit else None
+            )
+
+            order = client.submit_order(order_data)
+
+            return {
+                "success": True,
+                "entry_order_id": str(order.id),
+                "symbol": symbol,
+                "qty": qty or "notional",
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "message": f"Bracket order placed with stop ${stop_loss:.2f if stop_loss else 'N/A'}, target ${take_profit:.2f if take_profit else 'N/A'}"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    @staticmethod
+    def execute_trading_action(symbol: str, current_position: str, signal: str,
+                             dollar_amount: float, allow_shorts: bool = False,
+                             stop_loss: float = None, take_profit: list = None,
+                             use_bracket_orders: bool = False) -> dict:
         """
         Execute trading action based on current position and signal
-        
+
         Args:
             symbol: Stock symbol
             current_position: Current position state ("LONG", "SHORT", "NEUTRAL")
             signal: Trading signal from analysis
             dollar_amount: Dollar amount for trades
             allow_shorts: Whether short selling is allowed
-            
+            stop_loss: Stop loss price (optional)
+            take_profit: List of target prices (optional)
+            use_bracket_orders: Use native bracket orders (entry + stop + T1 target as one atomic order)
+
         Returns:
             Dictionary with execution results
         """
+        print(f"[EXECUTE] ═══════════════════════════════════════════════════")
+        print(f"[EXECUTE] execute_trading_action called for {symbol}")
+        print(f"[EXECUTE]   Position: {current_position} → Signal: {signal}")
+        print(f"[EXECUTE]   Dollar Amount: ${dollar_amount:.2f}")
+        print(f"[EXECUTE]   Stop Loss: ${stop_loss:.2f}" if stop_loss else "[EXECUTE]   Stop Loss: None")
+        print(f"[EXECUTE]   Take Profit: {[f'${t:.2f}' for t in take_profit]}" if take_profit else "[EXECUTE]   Take Profit: None")
+        print(f"[EXECUTE]   Bracket Orders: {'ON' if use_bracket_orders else 'OFF'}")
+        print(f"[EXECUTE] ═══════════════════════════════════════════════════")
+
         try:
             results = []
             
@@ -606,9 +895,47 @@ class AlpacaUtils:
                             else:
                                 # Calculate integer quantity for short (fractional shares cannot be shorted)
                                 qty_int = _calc_qty(symbol, dollar_amount)
-                                short_result = AlpacaUtils.place_market_order(symbol, "sell", qty=qty_int)
-                                results.append({"action": "open_short", "result": short_result})
-                
+                                if use_bracket_orders:
+                                    bracket_result = AlpacaUtils.place_bracket_order(
+                                        symbol=symbol, side="sell", qty=qty_int,
+                                        stop_loss=stop_loss if stop_loss else None,
+                                        take_profit=take_profit[0] if take_profit else None
+                                    )
+                                    results.append({"action": "open_short_bracket", "result": bracket_result})
+                                else:
+                                    short_result = AlpacaUtils.place_market_order(symbol, "sell", qty=qty_int)
+                                    results.append({"action": "open_short", "result": short_result})
+
+                                    # Place stop loss and take profit orders after short entry
+                                    if short_result.get("success"):
+                                        filled_qty = short_result.get("filled_qty")
+                                        if filled_qty is None:
+                                            filled_qty = qty_int
+
+                                        # Place stop loss if provided (BUY at higher price to limit losses)
+                                        if stop_loss and filled_qty:
+                                            stop_result = AlpacaUtils.place_stop_loss_order_short(symbol, filled_qty, stop_loss)
+                                            results.append({"action": "place_stop_loss", "result": stop_result})
+                                            if stop_result.get("success"):
+                                                print(f"[STOP LOSS] Placed stop loss (short) at ${stop_loss:.2f} for {filled_qty} shares of {symbol}")
+
+                                        # Place take profit orders if provided (BUY at lower price to lock profits)
+                                        if take_profit and filled_qty:
+                                            # Multiple targets: scale out
+                                            if len(take_profit) > 1:
+                                                qty_per_target = filled_qty // len(take_profit)
+                                                for i, target_price in enumerate(take_profit):
+                                                    target_qty = qty_per_target if i < len(take_profit) - 1 else (filled_qty - qty_per_target * (len(take_profit) - 1))
+                                                    profit_result = AlpacaUtils.place_limit_buy_order(symbol, target_qty, target_price)
+                                                    results.append({"action": f"place_target_{i+1}", "result": profit_result})
+                                                    if profit_result.get("success"):
+                                                        print(f"[TAKE PROFIT] Placed target {i+1} at ${target_price:.2f} for {target_qty} shares of {symbol}")
+                                            else:
+                                                profit_result = AlpacaUtils.place_limit_buy_order(symbol, filled_qty, take_profit[0])
+                                                results.append({"action": "place_take_profit", "result": profit_result})
+                                                if profit_result.get("success"):
+                                                    print(f"[TAKE PROFIT] Placed take profit at ${take_profit[0]:.2f} for {filled_qty} shares of {symbol}")
+
                 elif current_position == "SHORT":
                     if signal == "SHORT":
                         results.append({"action": "hold", "message": f"Keeping SHORT position in {symbol}"})
@@ -623,6 +950,81 @@ class AlpacaUtils:
                         if close_result.get("success"):
                             # Open LONG position - use notional amount for crypto, quantity for stocks
                             is_crypto = "/" in symbol.upper()
+                            if use_bracket_orders:
+                                bracket_sl = stop_loss if stop_loss else None
+                                bracket_tp = take_profit[0] if take_profit else None
+                                if is_crypto:
+                                    bracket_result = AlpacaUtils.place_bracket_order(
+                                        symbol=symbol, side="buy", notional=dollar_amount,
+                                        stop_loss=bracket_sl, take_profit=bracket_tp
+                                    )
+                                else:
+                                    qty_int = _calc_qty(symbol, dollar_amount)
+                                    bracket_result = AlpacaUtils.place_bracket_order(
+                                        symbol=symbol, side="buy", qty=qty_int,
+                                        stop_loss=bracket_sl, take_profit=bracket_tp
+                                    )
+                                results.append({"action": "open_long_bracket", "result": bracket_result})
+                            else:
+                                if is_crypto:
+                                    # For crypto, use exact dollar amount (notional)
+                                    long_result = AlpacaUtils.place_market_order(symbol, "buy", notional=dollar_amount)
+                                else:
+                                    # For stocks, calculate quantity
+                                    qty_int = _calc_qty(symbol, dollar_amount)
+                                    long_result = AlpacaUtils.place_market_order(symbol, "buy", qty=qty_int)
+                                results.append({"action": "open_long", "result": long_result})
+
+                                # Place stop loss and take profit orders after entry
+                                if long_result.get("success"):
+                                    filled_qty = long_result.get("filled_qty")
+                                    if filled_qty is None and not is_crypto:
+                                        filled_qty = qty_int
+
+                                    # Place stop loss if provided
+                                    if stop_loss and filled_qty:
+                                        stop_result = AlpacaUtils.place_stop_loss_order(symbol, filled_qty, stop_loss)
+                                        results.append({"action": "place_stop_loss", "result": stop_result})
+                                        if stop_result.get("success"):
+                                            print(f"[STOP LOSS] Placed stop loss at ${stop_loss:.2f} for {filled_qty} shares of {symbol}")
+
+                                    # Place take profit orders if provided
+                                    if take_profit and filled_qty:
+                                        # Multiple targets: scale out
+                                        if len(take_profit) > 1:
+                                            qty_per_target = filled_qty // len(take_profit)
+                                            for i, target_price in enumerate(take_profit):
+                                                target_qty = qty_per_target if i < len(take_profit) - 1 else (filled_qty - qty_per_target * (len(take_profit) - 1))
+                                                profit_result = AlpacaUtils.place_limit_sell_order(symbol, target_qty, target_price)
+                                                results.append({"action": f"place_target_{i+1}", "result": profit_result})
+                                                if profit_result.get("success"):
+                                                    print(f"[TAKE PROFIT] Placed target {i+1} at ${target_price:.2f} for {target_qty} shares of {symbol}")
+                                        else:
+                                            profit_result = AlpacaUtils.place_limit_sell_order(symbol, filled_qty, take_profit[0])
+                                            results.append({"action": "place_take_profit", "result": profit_result})
+                                            if profit_result.get("success"):
+                                                print(f"[TAKE PROFIT] Placed take profit at ${take_profit[0]:.2f} for {filled_qty} shares of {symbol}")
+
+                elif current_position == "NEUTRAL":
+                    if signal == "LONG":
+                        # Open LONG position - use notional amount for crypto, quantity for stocks
+                        is_crypto = "/" in symbol.upper()
+                        if use_bracket_orders:
+                            bracket_sl = stop_loss if stop_loss else None
+                            bracket_tp = take_profit[0] if take_profit else None
+                            if is_crypto:
+                                bracket_result = AlpacaUtils.place_bracket_order(
+                                    symbol=symbol, side="buy", notional=dollar_amount,
+                                    stop_loss=bracket_sl, take_profit=bracket_tp
+                                )
+                            else:
+                                qty_int = _calc_qty(symbol, dollar_amount)
+                                bracket_result = AlpacaUtils.place_bracket_order(
+                                    symbol=symbol, side="buy", qty=qty_int,
+                                    stop_loss=bracket_sl, take_profit=bracket_tp
+                                )
+                            results.append({"action": "open_long_bracket", "result": bracket_result})
+                        else:
                             if is_crypto:
                                 # For crypto, use exact dollar amount (notional)
                                 long_result = AlpacaUtils.place_market_order(symbol, "buy", notional=dollar_amount)
@@ -631,19 +1033,36 @@ class AlpacaUtils:
                                 qty_int = _calc_qty(symbol, dollar_amount)
                                 long_result = AlpacaUtils.place_market_order(symbol, "buy", qty=qty_int)
                             results.append({"action": "open_long", "result": long_result})
-                
-                elif current_position == "NEUTRAL":
-                    if signal == "LONG":
-                        # Open LONG position - use notional amount for crypto, quantity for stocks
-                        is_crypto = "/" in symbol.upper()
-                        if is_crypto:
-                            # For crypto, use exact dollar amount (notional)
-                            long_result = AlpacaUtils.place_market_order(symbol, "buy", notional=dollar_amount)
-                        else:
-                            # For stocks, calculate quantity
-                            qty_int = _calc_qty(symbol, dollar_amount)
-                            long_result = AlpacaUtils.place_market_order(symbol, "buy", qty=qty_int)
-                        results.append({"action": "open_long", "result": long_result})
+
+                            # Place stop loss and take profit orders after entry
+                            if long_result.get("success"):
+                                filled_qty = long_result.get("filled_qty")
+                                if filled_qty is None and not is_crypto:
+                                    filled_qty = qty_int
+
+                                # Place stop loss if provided
+                                if stop_loss and filled_qty:
+                                    stop_result = AlpacaUtils.place_stop_loss_order(symbol, filled_qty, stop_loss)
+                                    results.append({"action": "place_stop_loss", "result": stop_result})
+                                    if stop_result.get("success"):
+                                        print(f"[STOP LOSS] Placed stop loss at ${stop_loss:.2f} for {filled_qty} shares of {symbol}")
+
+                                # Place take profit orders if provided
+                                if take_profit and filled_qty:
+                                    # Multiple targets: scale out
+                                    if len(take_profit) > 1:
+                                        qty_per_target = filled_qty // len(take_profit)
+                                        for i, target_price in enumerate(take_profit):
+                                            target_qty = qty_per_target if i < len(take_profit) - 1 else (filled_qty - qty_per_target * (len(take_profit) - 1))
+                                            profit_result = AlpacaUtils.place_limit_sell_order(symbol, target_qty, target_price)
+                                            results.append({"action": f"place_target_{i+1}", "result": profit_result})
+                                            if profit_result.get("success"):
+                                                print(f"[TAKE PROFIT] Placed target {i+1} at ${target_price:.2f} for {target_qty} shares of {symbol}")
+                                    else:
+                                        profit_result = AlpacaUtils.place_limit_sell_order(symbol, filled_qty, take_profit[0])
+                                        results.append({"action": "place_take_profit", "result": profit_result})
+                                        if profit_result.get("success"):
+                                            print(f"[TAKE PROFIT] Placed take profit at ${take_profit[0]:.2f} for {filled_qty} shares of {symbol}")
                     elif signal == "SHORT":
                         # Check if this is crypto - Alpaca doesn't support crypto short selling directly
                         is_crypto = "/" in symbol.upper()
@@ -653,8 +1072,46 @@ class AlpacaUtils:
                         else:
                             # For stocks, attempt short selling
                             qty_int = _calc_qty(symbol, dollar_amount)
-                            short_result = AlpacaUtils.place_market_order(symbol, "sell", qty=qty_int)
-                            results.append({"action": "open_short", "result": short_result})
+                            if use_bracket_orders:
+                                bracket_result = AlpacaUtils.place_bracket_order(
+                                    symbol=symbol, side="sell", qty=qty_int,
+                                    stop_loss=stop_loss if stop_loss else None,
+                                    take_profit=take_profit[0] if take_profit else None
+                                )
+                                results.append({"action": "open_short_bracket", "result": bracket_result})
+                            else:
+                                short_result = AlpacaUtils.place_market_order(symbol, "sell", qty=qty_int)
+                                results.append({"action": "open_short", "result": short_result})
+
+                                # Place stop loss and take profit orders after short entry
+                                if short_result.get("success"):
+                                    filled_qty = short_result.get("filled_qty")
+                                    if filled_qty is None:
+                                        filled_qty = qty_int
+
+                                    # Place stop loss if provided (BUY at higher price to limit losses)
+                                    if stop_loss and filled_qty:
+                                        stop_result = AlpacaUtils.place_stop_loss_order_short(symbol, filled_qty, stop_loss)
+                                        results.append({"action": "place_stop_loss", "result": stop_result})
+                                        if stop_result.get("success"):
+                                            print(f"[STOP LOSS] Placed stop loss (short) at ${stop_loss:.2f} for {filled_qty} shares of {symbol}")
+
+                                    # Place take profit orders if provided (BUY at lower price to lock profits)
+                                    if take_profit and filled_qty:
+                                        # Multiple targets: scale out
+                                        if len(take_profit) > 1:
+                                            qty_per_target = filled_qty // len(take_profit)
+                                            for i, target_price in enumerate(take_profit):
+                                                target_qty = qty_per_target if i < len(take_profit) - 1 else (filled_qty - qty_per_target * (len(take_profit) - 1))
+                                                profit_result = AlpacaUtils.place_limit_buy_order(symbol, target_qty, target_price)
+                                                results.append({"action": f"place_target_{i+1}", "result": profit_result})
+                                                if profit_result.get("success"):
+                                                    print(f"[TAKE PROFIT] Placed target {i+1} at ${target_price:.2f} for {target_qty} shares of {symbol}")
+                                        else:
+                                            profit_result = AlpacaUtils.place_limit_buy_order(symbol, filled_qty, take_profit[0])
+                                            results.append({"action": "place_take_profit", "result": profit_result})
+                                            if profit_result.get("success"):
+                                                print(f"[TAKE PROFIT] Placed take profit at ${take_profit[0]:.2f} for {filled_qty} shares of {symbol}")
                     elif signal == "NEUTRAL":
                         results.append({"action": "hold", "message": f"No position needed for {symbol}"})
             
@@ -669,15 +1126,85 @@ class AlpacaUtils:
                     else:
                         # Buy position - use notional amount for crypto, quantity for stocks
                         is_crypto = "/" in symbol.upper()
-                        if is_crypto:
-                            # For crypto, use exact dollar amount (notional)
-                            buy_result = AlpacaUtils.place_market_order(symbol, "buy", notional=dollar_amount)
+                        if use_bracket_orders:
+                            bracket_sl = stop_loss if stop_loss else None
+                            bracket_tp = take_profit[0] if take_profit else None
+                            if is_crypto:
+                                bracket_result = AlpacaUtils.place_bracket_order(
+                                    symbol=symbol, side="buy", notional=dollar_amount,
+                                    stop_loss=bracket_sl, take_profit=bracket_tp
+                                )
+                            else:
+                                qty_int = _calc_qty(symbol, dollar_amount)
+                                bracket_result = AlpacaUtils.place_bracket_order(
+                                    symbol=symbol, side="buy", qty=qty_int,
+                                    stop_loss=bracket_sl, take_profit=bracket_tp
+                                )
+                            results.append({"action": "buy_bracket", "result": bracket_result})
                         else:
-                            # For stocks, calculate quantity
-                            qty_int = _calc_qty(symbol, dollar_amount)
-                            buy_result = AlpacaUtils.place_market_order(symbol, "buy", qty=qty_int)
-                        results.append({"action": "buy", "result": buy_result})
-                
+                            if is_crypto:
+                                # For crypto, use exact dollar amount (notional)
+                                buy_result = AlpacaUtils.place_market_order(symbol, "buy", notional=dollar_amount)
+                            else:
+                                # For stocks, calculate quantity
+                                qty_int = _calc_qty(symbol, dollar_amount)
+                                buy_result = AlpacaUtils.place_market_order(symbol, "buy", qty=qty_int)
+                            results.append({"action": "buy", "result": buy_result})
+
+                            # Place stop loss and take profit orders after entry
+                            if buy_result.get("success"):
+                                print(f"[EXECUTE] ✅ Entry order filled, checking for stop/target orders...")
+                                filled_qty = buy_result.get("filled_qty")
+                                if filled_qty is None and not is_crypto:
+                                    filled_qty = qty_int
+                                print(f"[EXECUTE] Filled quantity: {filled_qty}")
+
+                                # Place stop loss if provided
+                                if stop_loss and filled_qty:
+                                    print(f"[EXECUTE] Placing stop loss order at ${stop_loss:.2f}...")
+                                    stop_result = AlpacaUtils.place_stop_loss_order(symbol, filled_qty, stop_loss)
+                                    results.append({"action": "place_stop_loss", "result": stop_result})
+                                    if stop_result.get("success"):
+                                        print(f"[STOP LOSS] ✅ Placed stop loss at ${stop_loss:.2f} for {filled_qty} shares of {symbol}")
+                                    else:
+                                        print(f"[STOP LOSS] ❌ Failed: {stop_result.get('error')}")
+                                else:
+                                    if not stop_loss:
+                                        print(f"[EXECUTE] ⚠️ No stop loss provided (disabled or not extracted)")
+                                    elif not filled_qty:
+                                        print(f"[EXECUTE] ⚠️ No filled quantity, cannot place stop order")
+
+                                # Place take profit orders if provided
+                                if take_profit and filled_qty:
+                                    print(f"[EXECUTE] Placing take profit orders at {[f'${t:.2f}' for t in take_profit]}...")
+                                    # Multiple targets: scale out
+                                    if len(take_profit) > 1:
+                                        qty_per_target = filled_qty // len(take_profit)
+                                        for i, target_price in enumerate(take_profit):
+                                            # Last target gets remaining shares
+                                            target_qty = qty_per_target if i < len(take_profit) - 1 else (filled_qty - qty_per_target * (len(take_profit) - 1))
+                                            profit_result = AlpacaUtils.place_limit_sell_order(symbol, target_qty, target_price)
+                                            results.append({"action": f"place_target_{i+1}", "result": profit_result})
+                                            if profit_result.get("success"):
+                                                print(f"[TAKE PROFIT] ✅ Target {i+1} at ${target_price:.2f} for {target_qty} shares")
+                                            else:
+                                                print(f"[TAKE PROFIT] ❌ Target {i+1} failed: {profit_result.get('error')}")
+                                    # Single target
+                                    else:
+                                        profit_result = AlpacaUtils.place_limit_sell_order(symbol, filled_qty, take_profit[0])
+                                        results.append({"action": "place_take_profit", "result": profit_result})
+                                        if profit_result.get("success"):
+                                            print(f"[TAKE PROFIT] ✅ Placed at ${take_profit[0]:.2f} for {filled_qty} shares")
+                                        else:
+                                            print(f"[TAKE PROFIT] ❌ Failed: {profit_result.get('error')}")
+                                else:
+                                    if not take_profit:
+                                        print(f"[EXECUTE] ⚠️ No take profit provided (disabled or not extracted)")
+                                    elif not filled_qty:
+                                        print(f"[EXECUTE] ⚠️ No filled quantity, cannot place take profit order")
+                            else:
+                                print(f"[EXECUTE] ❌ Entry order failed, skipping stop/target orders")
+
                 elif signal == "SELL":
                     if has_position:
                         # Sell position

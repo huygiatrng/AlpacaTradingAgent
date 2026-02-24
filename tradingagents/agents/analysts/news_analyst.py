@@ -2,6 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import AIMessage, ToolMessage
 import time
 import json
+from tradingagents.agents.utils.agent_utils import log_llm_start, log_llm_end
 
 # Import prompt capture utility
 try:
@@ -19,21 +20,18 @@ def create_news_analyst(llm, toolkit):
         
         is_crypto = "/" in ticker or "USD" in ticker.upper() or "USDT" in ticker.upper()
 
-        if toolkit.config["online_tools"]:
-            tools = [toolkit.get_global_news_openai, toolkit.get_google_news]
+        if is_crypto:
+            tools = [
+                toolkit.get_coindesk_news,
+                toolkit.get_reddit_news,
+                toolkit.get_google_news,
+            ]
         else:
-            if is_crypto:
-                tools = [
-                    toolkit.get_coindesk_news,
-                    toolkit.get_reddit_news,
-                    toolkit.get_google_news,
-                ]
-            else:
-                tools = [
-                    toolkit.get_finnhub_news,
-                    toolkit.get_reddit_news,
-                    toolkit.get_google_news,
-                ]
+            tools = [
+                toolkit.get_finnhub_news,
+                toolkit.get_reddit_news,
+                toolkit.get_google_news,
+            ]
 
         system_message = (
             f"You are an EOD TRADING news analyst specializing in identifying news events and market developments that could drive overnight and next-day price movements for {ticker}. Focus on after-hours catalysts and sentiment shifts that create EOD trading opportunities."
@@ -50,7 +48,6 @@ def create_news_analyst(llm, toolkit):
             + "- Assess news impact magnitude (minor <2%, moderate 2-5%, major >5% overnight/next-day moves) \n"
             + "- Consider news durability (will impact persist through next day or just overnight?) \n"
             + "- Analyze market reaction patterns to similar news in overnight/pre-market sessions \n"
-            + f"**IMPORTANT:** When using get_global_news_openai, ALWAYS pass ticker_context='{ticker}' to get {('crypto-relevant global news (regulation, institutional adoption, DeFi developments)' if is_crypto else 'sector-relevant global news')} instead of generic macro news.\n"
             + "**AVOID:** Generic market commentary, long-term trends, intraday noise. Focus on EOD-relevant news with overnight impact potential.\n"
             + """ Make sure to append a Markdown table at the end organizing:
 | News Event | Date/Time | Impact Level | Price Direction | EOD Trading Implication |
@@ -107,20 +104,39 @@ For your reference, the current date is {current_date}. We are looking at the ti
             capture_agent_prompt("news_report", system_message, ticker)
 
         chain = prompt | llm.bind_tools(tools)
-        
+
         # Copy the incoming conversation history so we can append to it when the model makes tool calls
         messages_history = list(state["messages"])
 
+        # Track tools that have failed to prevent LLM retries
+        failed_tools = set()
+        max_iterations = 5  # Prevent infinite loops
+        iteration_count = 0
+
         # First LLM response
-        result = chain.invoke(messages_history)
+        model_name = getattr(llm, 'model_name', 'unknown')
+        start_time = log_llm_start("NEWS_ANALYST", model_name)
+        try:
+            result = chain.invoke(messages_history)
+            log_llm_end("NEWS_ANALYST", model_name, start_time, result)
+        except Exception as e:
+            elapsed = time.time() - start_time
+            print(f"[LLM - NEWS_ANALYST] ❌ {model_name} failed after {elapsed:.2f}s: {str(e)}")
+            raise
 
         # Handle iterative tool calls until the model stops requesting them
-        while getattr(result, "additional_kwargs", {}).get("tool_calls"):
-            for tool_call in result.additional_kwargs["tool_calls"]:
+        tool_calls_list = getattr(result, "tool_calls", None) or getattr(result, "additional_kwargs", {}).get("tool_calls", [])
+        while tool_calls_list and iteration_count < max_iterations:
+            iteration_count += 1
+            messages_history.append(result)
+
+            # Execute each tool and collect results
+            for tool_call in tool_calls_list:
                 # Handle different tool call structures
                 if isinstance(tool_call, dict):
                     tool_name = tool_call.get("name") or tool_call.get("function", {}).get("name")
                     tool_args = tool_call.get("args", {}) or tool_call.get("function", {}).get("arguments", {})
+                    tool_call_id = tool_call.get("id") or tool_call.get("tool_call_id")
                     if isinstance(tool_args, str):
                         try:
                             tool_args = json.loads(tool_args)
@@ -130,6 +146,14 @@ For your reference, the current date is {current_date}. We are looking at the ti
                     # Handle LangChain ToolCall objects
                     tool_name = getattr(tool_call, 'name', None)
                     tool_args = getattr(tool_call, 'args', {})
+                    tool_call_id = getattr(tool_call, 'id', None)
+
+                # Check if this tool has already failed - SKIP RETRY
+                if tool_name in failed_tools:
+                    tool_result = f"Tool '{tool_name}' already failed. Skipping retry."
+                    print(f"[NEWS] ⚠️ Skipping retry of failed tool: {tool_name}")
+                    messages_history.append(ToolMessage(content=tool_result, tool_call_id=tool_call_id))
+                    continue
 
                 # Find the matching tool by name
                 tool_fn = next((t for t in tools if t.name == tool_name), None)
@@ -139,32 +163,47 @@ For your reference, the current date is {current_date}. We are looking at the ti
                     print(f"[NEWS] ⚠️ {tool_result}")
                 else:
                     try:
+                        print(f"[NEWS] 🔧 Calling tool '{tool_name}'...")
+                        start_time = time.time()
+
                         # LangChain Tool objects expose `.run` (string IO) as well as `.invoke` (dict/kwarg IO)
                         if hasattr(tool_fn, "invoke"):
                             tool_result = tool_fn.invoke(tool_args)
                         else:
                             tool_result = tool_fn.run(**tool_args)
-                        
+
+                        elapsed = time.time() - start_time
+                        print(f"[NEWS] ✅ Tool '{tool_name}' completed ({elapsed:.2f}s)")
+
+                    except TimeoutError as timeout_err:
+                        elapsed = time.time() - start_time
+                        failed_tools.add(tool_name)
+                        tool_result = f"Tool '{tool_name}' timed out after {elapsed:.0f}s. Skipping."
+                        print(f"[NEWS] ⏰ TIMEOUT: {tool_result}")
                     except Exception as tool_err:
+                        elapsed = time.time() - start_time
                         tool_result = f"Error running tool '{tool_name}': {str(tool_err)}"
+                        print(f"[NEWS] ❌ Tool '{tool_name}' failed after {elapsed:.2f}s: {str(tool_err)}")
 
-                # Append the assistant tool call and tool result messages so the LLM can continue the conversation
-                tool_call_id = tool_call.get("id") or tool_call.get("tool_call_id")
-                ai_tool_call_msg = AIMessage(
-                    content="",
-                    additional_kwargs={"tool_calls": [tool_call]},
-                )
-                tool_msg = ToolMessage(
-                    content=str(tool_result),
-                    tool_call_id=tool_call_id,
-                )
-
-                messages_history.append(ai_tool_call_msg)
-                messages_history.append(tool_msg)
+                # Append the tool result
+                messages_history.append(ToolMessage(content=str(tool_result), tool_call_id=tool_call_id))
 
             # Ask the LLM to continue with the new context
-            result = chain.invoke(messages_history)
-        
+            model_name = getattr(llm, 'model_name', 'unknown')
+            start_time = log_llm_start("NEWS_ANALYST", model_name)
+            try:
+                result = chain.invoke(messages_history)
+                log_llm_end("NEWS_ANALYST", model_name, start_time, result)
+            except Exception as e:
+                elapsed = time.time() - start_time
+                print(f"[LLM - NEWS_ANALYST] ❌ {model_name} failed after {elapsed:.2f}s: {str(e)}")
+                raise
+            tool_calls_list = getattr(result, "tool_calls", None) or getattr(result, "additional_kwargs", {}).get("tool_calls", [])
+
+        # Check if we hit max iterations
+        if iteration_count >= max_iterations:
+            print(f"[NEWS] ⚠️ Reached max tool iterations ({max_iterations}). Proceeding with available data.")
+
         # Check if the result already contains FINAL TRANSACTION PROPOSAL
         if "FINAL TRANSACTION PROPOSAL:" not in result.content:
             # Create a simple prompt that includes the analysis content directly
@@ -174,11 +213,19 @@ Analysis:
 {result.content}
 
 You must conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** followed by a brief justification."""
-            
+
             # Use a simple chain without tools for the final recommendation
             final_chain = llm
-            final_result = final_chain.invoke(final_prompt)
-            
+            model_name = getattr(llm, 'model_name', 'unknown')
+            start_time = log_llm_start("NEWS_ANALYST", model_name)
+            try:
+                final_result = final_chain.invoke(final_prompt)
+                log_llm_end("NEWS_ANALYST", model_name, start_time, final_result)
+            except Exception as e:
+                elapsed = time.time() - start_time
+                print(f"[LLM - NEWS_ANALYST] ❌ {model_name} failed after {elapsed:.2f}s: {str(e)}")
+                raise
+
             # Combine the analysis with the final proposal
             combined_content = result.content + "\n\n" + final_result.content
             result = AIMessage(content=combined_content)

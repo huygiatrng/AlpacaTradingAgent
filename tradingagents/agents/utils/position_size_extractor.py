@@ -77,18 +77,23 @@ def extract_position_size(text: str, account_info: dict) -> dict:
     pattern_contextual_dollar = r"(?:allocate|risk|buy|invest|trade)\s*\$?([\d,]+(?:\.\d{2})?)\s*(?:k|K)?\s*(?:USD|dollars?|worth)?"
     match = re.search(pattern_contextual_dollar, text, re.IGNORECASE)
     if match:
-        amount_str = match.group(1).replace(',', '')
-        amount = float(amount_str)
+        amount_str = match.group(1).replace(',', '').strip()
+        # Validate that we got a non-empty string and can convert to float
+        if amount_str:
+            try:
+                amount = float(amount_str)
+                # Check if 'k' or 'K' suffix (multiply by 1000)
+                if 'k' in match.group(0).lower():
+                    amount *= 1000
 
-        # Check if 'k' or 'K' suffix (multiply by 1000)
-        if 'k' in match.group(0).lower():
-            amount *= 1000
-
-        result["recommended_size_dollars"] = amount
-        result["extraction_method"] = "contextual_dollar"
-        result["confidence"] = "medium"
-        result["original_text"] = match.group(0)
-        return result
+                result["recommended_size_dollars"] = amount
+                result["extraction_method"] = "contextual_dollar"
+                result["confidence"] = "medium"
+                result["original_text"] = match.group(0)
+                return result
+            except (ValueError, AttributeError):
+                # Failed to parse, continue to next pattern
+                pass
 
     # Pattern 4: Share quantities
     # Match: "50 shares" or "buy 100 shares"

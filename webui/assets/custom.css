@@ -346,6 +346,81 @@ body {
     border: 1px solid rgba(51, 65, 85, 0.5);
 }
 
+/* Order group header rows */
+.order-group-header {
+    background: linear-gradient(135deg, rgba(51, 65, 85, 0.7) 0%, rgba(30, 41, 59, 0.9) 100%);
+    border-bottom: 1px solid rgba(59, 130, 246, 0.25);
+    border-top: 1px solid rgba(59, 130, 246, 0.15);
+}
+
+.order-group-header td {
+    padding: 8px 12px;
+    font-size: 0.82rem;
+    letter-spacing: 0.3px;
+}
+
+.order-group-child td {
+    padding-left: 22px !important;
+}
+
+.order-group-child {
+    background-color: rgba(15, 23, 42, 0.4) !important;
+    border-bottom: 1px solid rgba(51, 65, 85, 0.2) !important;
+}
+
+.order-group-child:last-of-type {
+    border-bottom: 1px solid rgba(51, 65, 85, 0.4) !important;
+}
+
+.order-group-badge {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 10px;
+    background: rgba(30, 41, 59, 0.8);
+    border: 1px solid currentColor;
+    opacity: 0.9;
+}
+
+.order-group-count {
+    font-size: 0.72rem;
+    color: #94A3B8;
+    background: rgba(51, 65, 85, 0.6);
+    padding: 2px 7px;
+    border-radius: 10px;
+}
+
+/* Position section headers (LONG / SHORT dividers) */
+.position-section-header {
+    border-bottom: 1px solid rgba(51, 65, 85, 0.4);
+    border-top: 1px solid rgba(51, 65, 85, 0.4);
+    cursor: default;
+}
+
+.position-section-header td {
+    padding: 7px 12px;
+    font-size: 0.78rem;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+}
+
+.position-section-long {
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(16, 185, 129, 0.04) 100%);
+    color: #10B981;
+}
+
+.position-section-long .opacity-75 { opacity: 0.75; }
+
+.position-section-short {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.12) 0%, rgba(239, 68, 68, 0.04) 100%);
+    color: #EF4444;
+    margin-top: 4px;
+}
+
+.position-section-short .opacity-75 { opacity: 0.75; }
+
 /* Liquidate Button Styling */
 .liquidate-btn {
     transition: all 0.3s ease;
@@ -1379,15 +1454,366 @@ body {
         margin: 0.5rem;
         max-width: calc(100% - 1rem);
     }
-    
+
     .report-debug-buttons {
         flex-direction: column;
         gap: 0.25rem;
     }
-    
+
     .tool-outputs-content {
         font-size: 12px;
         max-height: 300px;
     }
+}
+
+/* Batch Overview Panel Styling */
+.ticker-row-display {
+    /* Rows are display-only, not interactive */
+}
+
+/* ========================================
+   DEBUG PANEL STYLING
+   ======================================== */
+
+/* Debug Panel Offcanvas */
+#debug-panel .offcanvas-header {
+    background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+    border-bottom: 2px solid #3B82F6;
+    color: #F1F5F9;
+}
+
+#debug-panel .offcanvas-body {
+    padding: 0;
+    background-color: #0F172A;
+    overflow-y: auto;
+}
+
+/* Debug Panel Tabs */
+#debug-panel .nav-tabs {
+    background: linear-gradient(135deg, #1E293B 0%, #111827 100%);
+    border-bottom: 2px solid #334155;
+    padding: 0.5rem 1rem 0 1rem;
+    margin: 0;
+}
+
+#debug-panel .nav-tabs .nav-link {
+    color: #94A3B8;
+    border: none;
+    background: transparent;
+    border-radius: 6px 6px 0 0;
+    padding: 0.75rem 1rem;
+    margin-right: 0.25rem;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+#debug-panel .nav-tabs .nav-link:hover {
+    color: #E2E8F0;
+    background: rgba(59, 130, 246, 0.1);
+}
+
+#debug-panel .nav-tabs .nav-link.active {
+    color: #FFFFFF;
+    background: #3B82F6;
+    border: none;
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+/* Debug Panel Tab Content */
+.debug-content-area {
+    scrollbar-width: thin;
+    scrollbar-color: #334155 #1E293B;
+}
+
+.debug-content-area::-webkit-scrollbar {
+    width: 8px;
+}
+
+.debug-content-area::-webkit-scrollbar-track {
+    background: #1E293B;
+    border-radius: 4px;
+}
+
+.debug-content-area::-webkit-scrollbar-thumb {
+    background: #334155;
+    border-radius: 4px;
+}
+
+.debug-content-area::-webkit-scrollbar-thumb:hover {
+    background: #475569;
+}
+
+/* Debug Dropdown Styling */
+.debug-dropdown .Select-control {
+    background-color: #1E293B !important;
+    border-color: #334155 !important;
+    color: #F1F5F9 !important;
+}
+
+.debug-dropdown .Select-menu-outer {
+    background-color: #1E293B !important;
+    border-color: #334155 !important;
+}
+
+.debug-dropdown .Select-option {
+    background-color: #1E293B !important;
+    color: #F1F5F9 !important;
+}
+
+.debug-dropdown .Select-option:hover {
+    background-color: rgba(59, 130, 246, 0.1) !important;
+}
+
+/* Tool Call Accordion */
+.debug-accordion {
+    background-color: transparent;
+}
+
+/* Custom tab nav (replaces dbc.Tabs to avoid Bootstrap tab-pane CSS issues) */
+.debug-tab-nav {
+    display: flex;
+    background: linear-gradient(135deg, #1E293B 0%, #111827 100%);
+    border-bottom: 2px solid #334155;
+    padding: 0.5rem 1rem 0;
+    margin: 0;
+}
+
+.debug-tab-btn {
+    background: transparent;
+    border: none;
+    color: #94A3B8;
+    padding: 0.5rem 1.25rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+    transition: all 0.2s ease;
+    border-radius: 4px 4px 0 0;
+}
+
+.debug-tab-btn:hover {
+    color: #E2E8F0;
+    background: rgba(59, 130, 246, 0.1);
+}
+
+.debug-tab-btn-active {
+    color: #FFFFFF;
+    background: #3B82F6;
+}
+
+/* Native details/summary collapsible tool call items */
+.tool-call-details {
+    background-color: #1E293B;
+    border: 1px solid #334155;
+    border-radius: 6px;
+}
+
+.tool-call-summary {
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    color: #E2E8F0;
+    font-weight: 500;
+    font-size: 0.875rem;
+    list-style: none;
+    user-select: none;
+}
+
+.tool-call-summary::-webkit-details-marker { display: none; }
+
+.tool-call-summary::before {
+    content: "▶ ";
+    font-size: 0.7rem;
+    color: #64748B;
+}
+
+.tool-call-details[open] > .tool-call-summary::before {
+    content: "▼ ";
+}
+
+.tool-call-summary:hover {
+    background-color: #334155;
+    border-radius: 6px;
+}
+
+.tool-call-details[open] > .tool-call-summary {
+    background-color: #2a3f5f;
+    border-bottom: 1px solid #334155;
+    border-radius: 6px 6px 0 0;
+}
+
+.tool-call-details-body {
+    background-color: #0F172A;
+    color: #E2E8F0;
+    border-radius: 0 0 6px 6px;
+}
+
+.tool-call-accordion-item {
+    background-color: #1E293B;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    margin-bottom: 0.75rem;
+}
+
+.tool-call-accordion-item .accordion-header button {
+    background-color: #1E293B;
+    color: #E2E8F0;
+    border: none;
+    padding: 1rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.tool-call-accordion-item .accordion-header button:hover {
+    background-color: #334155;
+}
+
+.tool-call-accordion-item .accordion-header button:not(.collapsed) {
+    background-color: #2a3f5f;
+    color: #FFFFFF;
+    box-shadow: inset 0 -1px 0 #3B82F6;
+}
+
+.tool-call-accordion-item .accordion-body {
+    background-color: #0F172A;
+    border-top: 1px solid #334155;
+    padding: 1.25rem;
+    color: #E2E8F0;
+}
+
+/* Tool Call Code Blocks */
+.tool-call-code-block pre {
+    background-color: #0D1117 !important;
+    border: 1px solid #30363D !important;
+    border-radius: 6px;
+    padding: 1rem !important;
+    margin: 0.5rem 0;
+    overflow-x: auto;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+.tool-call-code-block code {
+    background-color: transparent !important;
+    color: #F8F8F2 !important;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+/* Prompt Code Block */
+.prompt-code-block pre {
+    background-color: #0D1117 !important;
+    border: 1px solid #30363D !important;
+    border-radius: 6px;
+    padding: 1.5rem !important;
+    margin: 1rem 0;
+    max-height: 600px;
+    overflow-y: auto;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.85rem;
+    line-height: 1.6;
+    color: #E2E8F0 !important;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.prompt-code-block code {
+    background-color: transparent !important;
+    color: #E2E8F0 !important;
+}
+
+/* Debug Panel Toggle Button */
+#toggle-debug-panel {
+    transition: all 0.3s ease;
+}
+
+#toggle-debug-panel:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+    background-color: #EF4444 !important;
+    border-color: #EF4444 !important;
+    color: #FFFFFF !important;
+}
+
+#toggle-debug-panel:active {
+    transform: translateY(0);
+}
+
+/* Stats Display in Debug Panel */
+#debug-tool-calls-stats {
+    font-size: 0.9rem;
+}
+
+#debug-tool-calls-stats .h4 {
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+}
+
+#debug-tool-calls-stats .small {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Status Badges in Tool Calls */
+.badge-success {
+    background-color: #10B981 !important;
+}
+
+.badge-danger {
+    background-color: #EF4444 !important;
+}
+
+.badge-secondary {
+    background-color: #6B7280 !important;
+}
+
+/* Empty State Messages */
+.text-muted {
+    opacity: 0.7;
+}
+
+/* Responsive Design for Debug Panel */
+@media (max-width: 768px) {
+    #debug-panel {
+        width: 100% !important;
+    }
+
+    .debug-content-area {
+        max-height: calc(100vh - 250px) !important;
+    }
+
+    .tool-call-accordion-item .accordion-header button {
+        font-size: 0.85rem;
+        padding: 0.75rem;
+    }
+
+    .tool-call-accordion-item .accordion-body {
+        padding: 1rem;
+        font-size: 0.85rem;
+    }
+
+    .tool-call-code-block pre,
+    .prompt-code-block pre {
+        font-size: 0.75rem;
+        padding: 0.75rem !important;
+    }
+}
+
+/* Animation for panel opening */
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+#debug-panel.show {
+    animation: slideInRight 0.3s ease-out;
+}
+
+/* Backdrop overlay when panel is open */
+.offcanvas-backdrop {
+    background-color: rgba(0, 0, 0, 0.3);
 }
 

@@ -2,6 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import AIMessage, ToolMessage
 import time
 import json
+from tradingagents.agents.utils.agent_utils import log_llm_start, log_llm_end
 
 # Import prompt capture utility
 try:
@@ -21,31 +22,21 @@ def create_market_analyst(llm, toolkit):
 
         is_crypto = "/" in ticker or "USD" in ticker.upper() or "USDT" in ticker.upper()
 
+        # All tools now use smart caching - no need for online_tools flag
         if is_crypto:
             # Crypto gets the same data tools as stocks since Alpaca supports crypto
-            if toolkit.config["online_tools"]:
-                tools = [
-                    toolkit.get_alpaca_data,  # Alpaca supports crypto price data
-                    toolkit.get_indicators_table,
-                    toolkit.get_stockstats_indicators_report_online,
-                    toolkit.get_coindesk_news  # Plus crypto-specific news
-                ]
-            else:
-                tools = [
-                    toolkit.get_alpaca_data_report,  # Alpaca supports crypto price data
-                    toolkit.get_stockstats_indicators_report,
-                    toolkit.get_coindesk_news  # Plus crypto-specific news
-                ]
-        elif toolkit.config["online_tools"]:
+            tools = [
+                toolkit.get_alpaca_data,  # Alpaca supports crypto price data (with caching)
+                toolkit.get_indicators_table,
+                toolkit.get_stockstats_indicators_report_online,
+                toolkit.get_coindesk_news  # Plus crypto-specific news (with caching)
+            ]
+        else:
+            # Stock tools with smart caching
             tools = [
                 toolkit.get_stock_data_table,
                 toolkit.get_indicators_table,
                 toolkit.get_stockstats_indicators_report_online,  # Keep for custom indicators
-            ]
-        else:
-            tools = [
-                toolkit.get_alpaca_data_report,
-                toolkit.get_stockstats_indicators_report,
             ]
 
         system_message = (
@@ -163,16 +154,37 @@ For your reference, the current date is {current_date}. The company we want to l
         # Copy the incoming conversation history so we can append to it when the model makes tool calls
         messages_history = list(state["messages"])
 
+        # Track tools that have failed to prevent LLM retries
+        failed_tools = set()
+        max_iterations = 5  # Prevent infinite loops
+        iteration_count = 0
+
         # First LLM response
-        result = chain.invoke(messages_history)
+        model_name = getattr(llm, 'model_name', 'unknown')
+        start_time = log_llm_start("MARKET_ANALYST", model_name)
+        try:
+            result = chain.invoke(messages_history)
+            log_llm_end("MARKET_ANALYST", model_name, start_time, result)
+        except Exception as e:
+            elapsed = time.time() - start_time
+            print(f"[LLM - MARKET_ANALYST] ❌ {model_name} failed after {elapsed:.2f}s: {str(e)}")
+            raise
 
         # Handle iterative tool calls until the model stops requesting them
-        while getattr(result, "additional_kwargs", {}).get("tool_calls"):
-            for tool_call in result.additional_kwargs["tool_calls"]:
+        # Check both result.tool_calls (modern LangChain) and additional_kwargs["tool_calls"] (legacy)
+        tool_calls_list = getattr(result, "tool_calls", None) or getattr(result, "additional_kwargs", {}).get("tool_calls", [])
+        while tool_calls_list and iteration_count < max_iterations:
+            iteration_count += 1
+            # Append the AI message with tool calls (it's already properly formatted)
+            messages_history.append(result)
+
+            # Execute each tool and collect results
+            for tool_call in tool_calls_list:
                 # Handle different tool call structures
                 if isinstance(tool_call, dict):
                     tool_name = tool_call.get("name") or tool_call.get("function", {}).get("name")
                     tool_args = tool_call.get("args", {}) or tool_call.get("function", {}).get("arguments", {})
+                    tool_call_id = tool_call.get("id") or tool_call.get("tool_call_id")
                     if isinstance(tool_args, str):
                         try:
                             tool_args = json.loads(tool_args)
@@ -182,6 +194,18 @@ For your reference, the current date is {current_date}. The company we want to l
                     # Handle LangChain ToolCall objects
                     tool_name = getattr(tool_call, 'name', None)
                     tool_args = getattr(tool_call, 'args', {})
+                    tool_call_id = getattr(tool_call, 'id', None)
+
+                # Check if this tool has already failed - SKIP RETRY
+                if tool_name in failed_tools:
+                    tool_result = f"PERMANENT FAILURE: Tool '{tool_name}' already failed in this analysis. Will not retry. Proceed with analysis using other available data sources."
+                    print(f"[MARKET] ⚠️ Skipping retry of failed tool: {tool_name}")
+                    tool_msg = ToolMessage(
+                        content=tool_result,
+                        tool_call_id=tool_call_id,
+                    )
+                    messages_history.append(tool_msg)
+                    continue
 
                 # Find the matching tool by name
                 tool_fn = next((t for t in tools if t.name == tool_name), None)
@@ -191,31 +215,53 @@ For your reference, the current date is {current_date}. The company we want to l
                     print(f"[MARKET] ⚠️ {tool_result}")
                 else:
                     try:
+                        print(f"[MARKET] 🔧 Starting tool '{tool_name}'...")
+                        start_time = time.time()
+
                         # LangChain Tool objects expose `.run` (string IO) as well as `.invoke` (dict/kwarg IO)
                         if hasattr(tool_fn, "invoke"):
                             tool_result = tool_fn.invoke(tool_args)
                         else:
                             tool_result = tool_fn.run(**tool_args)
-                        
-                    except Exception as tool_err:
-                        tool_result = f"Error running tool '{tool_name}': {str(tool_err)}"
 
-                # Append the assistant tool call and tool result messages so the LLM can continue the conversation
-                tool_call_id = tool_call.get("id") or tool_call.get("tool_call_id")
-                ai_tool_call_msg = AIMessage(
-                    content="",
-                    additional_kwargs={"tool_calls": [tool_call]},
-                )
+                        elapsed = time.time() - start_time
+                        print(f"[MARKET] ✅ Tool '{tool_name}' completed (took {elapsed:.2f}s)")
+
+                    except TimeoutError as timeout_err:
+                        elapsed = time.time() - start_time
+                        # Mark this tool as failed to prevent retries
+                        failed_tools.add(tool_name)
+                        tool_result = f"PERMANENT FAILURE: Tool '{tool_name}' timed out after {elapsed:.0f}s. This tool will not be retried. Proceed with analysis using other available data sources."
+                        print(f"[MARKET] ⏰ TIMEOUT: {tool_result}")
+                    except Exception as tool_err:
+                        elapsed = time.time() - start_time
+                        tool_result = f"Error running tool '{tool_name}': {str(tool_err)}"
+                        print(f"[MARKET] ❌ Tool '{tool_name}' failed after {elapsed:.2f}s: {str(tool_err)}")
+
+                # Append the tool result message
                 tool_msg = ToolMessage(
                     content=str(tool_result),
                     tool_call_id=tool_call_id,
                 )
-
-                messages_history.append(ai_tool_call_msg)
                 messages_history.append(tool_msg)
 
             # Ask the LLM to continue with the new context
-            result = chain.invoke(messages_history)
+            model_name = getattr(llm, 'model_name', 'unknown')
+            start_time = log_llm_start("MARKET_ANALYST", model_name)
+            try:
+                result = chain.invoke(messages_history)
+                log_llm_end("MARKET_ANALYST", model_name, start_time, result)
+            except Exception as e:
+                elapsed = time.time() - start_time
+                print(f"[LLM - MARKET_ANALYST] ❌ {model_name} failed after {elapsed:.2f}s: {str(e)}")
+                raise
+
+            # Update tool_calls_list for next iteration
+            tool_calls_list = getattr(result, "tool_calls", None) or getattr(result, "additional_kwargs", {}).get("tool_calls", [])
+
+        # Check if we hit max iterations
+        if iteration_count >= max_iterations:
+            print(f"[MARKET] ⚠️ Reached max tool iterations ({max_iterations}). Proceeding with available data.")
         
         # Check if the result already contains FINAL TRANSACTION PROPOSAL
         if "FINAL TRANSACTION PROPOSAL:" not in result.content:
@@ -226,11 +272,19 @@ Analysis:
 {result.content}
 
 You must conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** followed by a brief justification."""
-            
+
             # Use a simple chain without tools for the final recommendation
             final_chain = llm
-            final_result = final_chain.invoke(final_prompt)
-            
+            model_name = getattr(llm, 'model_name', 'unknown')
+            start_time = log_llm_start("MARKET_ANALYST", model_name)
+            try:
+                final_result = final_chain.invoke(final_prompt)
+                log_llm_end("MARKET_ANALYST", model_name, start_time, final_result)
+            except Exception as e:
+                elapsed = time.time() - start_time
+                print(f"[LLM - MARKET_ANALYST] ❌ {model_name} failed after {elapsed:.2f}s: {str(e)}")
+                raise
+
             # Combine the analysis with the final proposal
             combined_content = result.content + "\n\n" + final_result.content
             result = AIMessage(content=combined_content)

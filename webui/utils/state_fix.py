@@ -17,7 +17,7 @@ def apply_report_mapping_fix():
         # Patch the process_chunk_updates method to fix report mapping
         original_process_chunk_updates = AppState.process_chunk_updates
         
-        def fixed_process_chunk_updates(self, chunk):
+        def fixed_process_chunk_updates(self, chunk, ticker=None):
             """Fixed version that correctly maps social analyst reports"""
             
             # Fix report field mapping before processing
@@ -42,7 +42,7 @@ def apply_report_mapping_fix():
                         # print(f"[FIX] Corrected: market_report -> sentiment_report")
             
             # Call the original method with the fixed chunk
-            return original_process_chunk_updates(self, chunk)
+            return original_process_chunk_updates(self, chunk, ticker=ticker)
         
         # Apply the patch
         AppState.process_chunk_updates = fixed_process_chunk_updates

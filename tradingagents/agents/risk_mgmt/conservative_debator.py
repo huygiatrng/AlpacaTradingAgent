@@ -2,6 +2,7 @@ from langchain_core.messages import AIMessage
 import time
 import json
 from ..utils.agent_trading_modes import get_trading_mode_context, get_agent_specific_context
+from tradingagents.agents.utils.agent_utils import log_llm_start, log_llm_end
 
 # Import prompt capture utility
 try:
@@ -104,7 +105,15 @@ Output conversationally as if you are speaking without any special formatting.""
         ticker = state.get("company_of_interest", "")
         capture_agent_prompt("conservative_report", prompt, ticker)
 
-        response = llm.invoke(prompt)
+        model_name = getattr(llm, 'model_name', 'unknown')
+        start_time = log_llm_start("BULL_RISK", model_name)
+        try:
+            response = llm.invoke(prompt)
+            log_llm_end("BULL_RISK", model_name, start_time, response)
+        except Exception as e:
+            elapsed = time.time() - start_time
+            print(f"[LLM - BULL_RISK] ❌ {model_name} failed after {elapsed:.2f}s: {str(e)}")
+            raise
 
         argument = f"Safe Analyst: {response.content}"
 

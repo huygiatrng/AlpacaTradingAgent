@@ -22,6 +22,8 @@ DEFAULT_SETTINGS = {
     "trade_after_analyze": False,
     "trade_dollar_amount": 4500,
     "ai_position_sizing": True,  # AI-determined position sizing enabled by default
+    "use_stop_loss": True,  # Stop loss orders enabled by default
+    "use_take_profit": True,  # Take profit orders enabled by default
     "quick_llm": "gpt-5-mini-2025-08-07",
     "deep_llm": "gpt-5.2-2025-12-11"
 }

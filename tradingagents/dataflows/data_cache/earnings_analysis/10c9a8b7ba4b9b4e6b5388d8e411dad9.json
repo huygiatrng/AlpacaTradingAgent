@@ -1,0 +1,9 @@
+{
+  "metadata": {
+    "function": "get_earnings_surprise_analysis",
+    "args": "('BAC', '2026-02-20', 8)",
+    "kwargs": "{}",
+    "cached_at": "2026-02-20T15:12:55.149513"
+  },
+  "data": "## BAC Earnings Surprise Analysis\n\n**Analysis Period**: 2024-03-02 to 2026-02-20 (Last 8 quarters)\n\n### Key Patterns to Monitor:\n- **Consistency**: Does the company consistently beat/miss estimates?\n- **Magnitude**: How significant are the surprises (>5% is typically material)?\n- **Revenue vs EPS**: Which metric shows more volatility?\n- **Seasonal Patterns**: Are certain quarters historically stronger?\n\n### Trading Implications:\n- **Pre-earnings**: High surprise history = higher IV and option premiums\n- **Post-earnings**: Surprise magnitude often correlates with price movement\n- **Guidance**: Forward guidance often more important than backward-looking results\n\n## BAC Earnings Calendar (2024-03-02 to 2026-02-20)\n\n**Data Source:** Yahoo Finance (via yfinance)\n\n### 2026-01-14\n- **EPS Estimate**: 0.96\n- **EPS Reported**: 0.98\n- **Surprise**: 0.0200 (+2.08%)\n\n### 2025-10-15\n- **EPS Estimate**: 0.95\n- **EPS Reported**: 1.06\n- **Surprise**: 0.1100 (+11.58%)\n\n### 2025-07-16\n- **EPS Estimate**: 0.86\n- **EPS Reported**: 0.89\n- **Surprise**: 0.0300 (+3.49%)\n\n### 2025-04-15\n- **EPS Estimate**: 0.82\n- **EPS Reported**: 0.9\n- **Surprise**: 0.0800 (+9.76%)\n\n### 2025-01-16\n- **EPS Estimate**: 0.77\n- **EPS Reported**: 0.82\n- **Surprise**: 0.0500 (+6.49%)\n\n### 2024-10-15\n- **EPS Estimate**: 0.76\n- **EPS Reported**: 0.81\n- **Surprise**: 0.0500 (+6.58%)\n\n### 2024-07-16\n- **EPS Estimate**: 0.8\n- **EPS Reported**: 0.83\n- **Surprise**: 0.0300 (+3.75%)\n\n### 2024-04-16\n- **EPS Estimate**: 0.77\n- **EPS Reported**: 0.76\n- **Surprise**: -0.0100 (-1.30%)\n\n"
+}

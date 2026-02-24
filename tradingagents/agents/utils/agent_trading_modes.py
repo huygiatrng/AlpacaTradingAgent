@@ -9,6 +9,7 @@ Two trading modes supported:
 2. Trading Mode (allow_shorts=True): LONG/NEUTRAL/SHORT actions with position logic
 """
 
+import re
 from typing import Dict, Any, Optional, Tuple
 
 
@@ -259,11 +260,19 @@ def extract_recommendation(response_content: str, trading_mode: str) -> Optional
             if pattern in content:
                 return pattern.split("**")[1]
                 
-        # Fallback - look for standalone actions at end
+        # Fallback - look for standalone actions in wider window
         for action in TradingModeConfig.INVESTMENT_ACTIONS:
-            if f"**{action}**" in content[-100:]:  # Check last 100 chars
+            if f"**{action}**" in content[-500:]:
                 return action
-                
+        # Lenient fallback - match with or without bold markers
+        lenient = re.search(
+            r"FINAL\s+(?:TRANSACTION\s+PROPOSAL|TRADING\s+DECISION|RISK\s+MANAGEMENT\s+DECISION|DECISION)"
+            r"\s*:\s*\*{0,2}\s*(BUY|HOLD|SELL)\s*\*{0,2}",
+            content
+        )
+        if lenient:
+            return lenient.group(1)
+
     else:  # trading mode
         # Look for LONG/NEUTRAL/SHORT patterns
         patterns = [
@@ -285,11 +294,19 @@ def extract_recommendation(response_content: str, trading_mode: str) -> Optional
             if pattern in content:
                 return pattern.split("**")[1]
                 
-        # Fallback - look for standalone actions at end
+        # Fallback - look for standalone actions in wider window
         for action in TradingModeConfig.TRADING_ACTIONS:
-            if f"**{action}**" in content[-100:]:  # Check last 100 chars
+            if f"**{action}**" in content[-500:]:
                 return action
-    
+        # Lenient fallback - match with or without bold markers
+        lenient = re.search(
+            r"FINAL\s+(?:TRANSACTION\s+PROPOSAL|TRADING\s+DECISION|RISK\s+MANAGEMENT\s+DECISION|DECISION)"
+            r"\s*:\s*\*{0,2}\s*(LONG|SHORT|NEUTRAL)\s*\*{0,2}",
+            content
+        )
+        if lenient:
+            return lenient.group(1)
+
     return None
 
 
@@ -384,23 +401,37 @@ def get_position_transition(current_position: str, new_signal: str) -> Dict[str,
     })
 
 
-def format_final_decision(recommendation: str, trading_mode: str) -> str:
+def format_final_decision(
+    recommendation: str,
+    trading_mode: str,
+    full_analysis: str = ""
+) -> str:
     """
-    Format the final decision string consistently
-    
+    Format the final decision while preserving full analysis content.
+
     Args:
-        recommendation: The recommendation (BUY/HOLD/SELL or LONG/NEUTRAL/SHORT)
+        recommendation: The extracted recommendation (BUY/HOLD/SELL or LONG/NEUTRAL/SHORT)
         trading_mode: 'investment' or 'trading'
-        
+        full_analysis: Original full LLM response content to preserve
+
     Returns:
-        Formatted final decision string
+        Formatted decision with analysis preserved, or just formatted decision if no analysis
     """
     if not recommendation:
-        return "FINAL DECISION: **NO_RECOMMENDATION**"
-        
-    recommendation = recommendation.upper()
-    
-    if trading_mode == "investment":
-        return f"FINAL TRANSACTION PROPOSAL: **{recommendation}**"
-    else:  # trading mode
-        return f"FINAL TRANSACTION PROPOSAL: **{recommendation}**" 
+        formatted_decision = "FINAL DECISION: **NO_RECOMMENDATION**"
+    else:
+        recommendation = recommendation.upper()
+        formatted_decision = f"FINAL TRANSACTION PROPOSAL: **{recommendation}**"
+
+    # If full analysis is provided and substantial, preserve it
+    if full_analysis and len(full_analysis.strip()) > 100:
+        # Check if analysis already contains a formatted final decision
+        if "FINAL TRANSACTION PROPOSAL:" in full_analysis or "FINAL DECISION:" in full_analysis:
+            # Analysis already includes the decision, return as-is
+            return full_analysis
+        else:
+            # Append formatted decision to analysis
+            return f"{full_analysis}\n\n---\n\n{formatted_decision}"
+
+    # No analysis provided, return just the formatted decision
+    return formatted_decision 

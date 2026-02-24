@@ -15,6 +15,18 @@ from tradingagents.default_config import DEFAULT_CONFIG
 import json
 import time
 from functools import wraps
+import threading
+
+# Thread-local storage for tracking current symbol in each thread
+_thread_locals = threading.local()
+
+def set_thread_symbol(symbol: str):
+    """Set the current symbol for this thread (for tool tracking)"""
+    _thread_locals.current_symbol = symbol
+
+def get_thread_symbol() -> str:
+    """Get the current symbol for this thread"""
+    return getattr(_thread_locals, 'current_symbol', None)
 
 
 def timing_wrapper(analyst_type, timeout_seconds=120):
@@ -73,24 +85,30 @@ def timing_wrapper(analyst_type, timeout_seconds=120):
                 from webui.utils.state import app_state
                 import datetime
                 timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-                
+
                 # Execute the function with timeout protection
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                # Use explicit executor management to avoid blocking on shutdown
+                executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                try:
                     future = executor.submit(run_function)
                     try:
                         # Wait for the function to complete with timeout
                         result = future.result(timeout=timeout_seconds)
-                        
+
                         # Check for very slow execution (warn if > 30s)
                         partial_elapsed = time.time() - start_time
                         if partial_elapsed > 120:
                             print(f"[{analyst_type}] ⚠️ Slow execution warning: {tool_name} took {partial_elapsed:.1f}s")
-                            
+
                     except concurrent.futures.TimeoutError:
                         elapsed = time.time() - start_time
                         timeout_msg = f"TIMEOUT: Tool '{tool_name}' exceeded {timeout_seconds}s limit (stopped at {elapsed:.1f}s)"
                         print(f"[{analyst_type}] ⏰ {timeout_msg}")
-                        
+
+                        # CRITICAL: Don't wait for the background thread to complete
+                        # This prevents the main thread from blocking indefinitely
+                        executor.shutdown(wait=False)
+
                         # Store timeout info
                         tool_call_info = {
                             "timestamp": timestamp,
@@ -100,20 +118,25 @@ def timing_wrapper(analyst_type, timeout_seconds=120):
                             "execution_time": f"{elapsed:.2f}s",
                             "status": "timeout",
                             "agent_type": analyst_type,
-                            "symbol": getattr(app_state, 'analyzing_symbol', None) or getattr(app_state, 'current_symbol', None),
+                            "symbol": get_thread_symbol() or getattr(app_state, 'analyzing_symbol', None) or getattr(app_state, 'current_symbol', None),
                             "error_details": {
                                 "error_type": "TimeoutError",
                                 "timeout_seconds": timeout_seconds,
                                 "actual_time": elapsed
                             }
                         }
-                        
+
                         app_state.tool_calls_log.append(tool_call_info)
                         app_state.tool_calls_count = len(app_state.tool_calls_log)
                         app_state.needs_ui_update = True
-                        
+
                         # Return a timeout error message
                         return f"Error: Tool '{tool_name}' timed out after {timeout_seconds}s. This may indicate network issues, API problems, or insufficient data."
+                finally:
+                    # Clean shutdown for non-timeout cases
+                    # Only wait if not already shut down
+                    if not executor._shutdown:
+                        executor.shutdown(wait=True)
                 
                 # Calculate execution time
                 elapsed = time.time() - start_time
@@ -123,8 +146,9 @@ def timing_wrapper(analyst_type, timeout_seconds=120):
                 result_summary = result
                 
                 # Store the complete tool call information including the output
-                # Get current symbol from app_state for filtering
-                current_symbol = getattr(app_state, 'analyzing_symbol', None) or getattr(app_state, 'current_symbol', None)
+                # Get current symbol from thread-local storage (thread-safe for parallel execution)
+                # Fallback to app_state for single-symbol mode
+                current_symbol = get_thread_symbol() or getattr(app_state, 'analyzing_symbol', None) or getattr(app_state, 'current_symbol', None)
                 
                 tool_call_info = {
                     "timestamp": timestamp,
@@ -183,8 +207,9 @@ def timing_wrapper(analyst_type, timeout_seconds=120):
                     import datetime
                     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
                     
-                    # Get current symbol from app_state for filtering
-                    current_symbol = getattr(app_state, 'analyzing_symbol', None) or getattr(app_state, 'current_symbol', None)
+                    # Get current symbol from thread-local storage (thread-safe for parallel execution)
+                    # Fallback to app_state for single-symbol mode
+                    current_symbol = get_thread_symbol() or getattr(app_state, 'analyzing_symbol', None) or getattr(app_state, 'current_symbol', None)
                     
                     tool_call_info = {
                         "timestamp": timestamp,
@@ -211,6 +236,32 @@ def timing_wrapper(analyst_type, timeout_seconds=120):
     return decorator
 
 
+def log_llm_start(agent_type: str, model_name: str) -> float:
+    """Log start of LLM call and return start time"""
+    print(f"[LLM - {agent_type}] Calling {model_name}...")
+    return time.time()
+
+
+def log_llm_end(agent_type: str, model_name: str, start_time: float, result=None):
+    """Log completion of LLM call with timing and token info"""
+    elapsed = time.time() - start_time
+
+    # Extract token usage if available
+    tokens_str = ""
+    if result:
+        if hasattr(result, 'usage_metadata'):
+            usage = result.usage_metadata
+            input_tokens = getattr(usage, 'input_tokens', 0)
+            output_tokens = getattr(usage, 'output_tokens', 0)
+            tokens_str = f" | Tokens: {input_tokens}→{output_tokens}"
+        elif hasattr(result, 'response_metadata'):
+            usage = result.response_metadata.get('token_usage', {})
+            if usage:
+                tokens_str = f" | Tokens: {usage.get('prompt_tokens', 0)}→{usage.get('completion_tokens', 0)}"
+
+    print(f"[LLM - {agent_type}] ✅ {model_name} completed in {elapsed:.2f}s{tokens_str}")
+
+
 def create_msg_delete():
     def delete_messages(state):
         """To prevent message history from overflowing, regularly clear message history after a stage of the pipeline is done"""
@@ -221,21 +272,41 @@ def create_msg_delete():
 
 
 class Toolkit:
-    _config = DEFAULT_CONFIG.copy()
+    """Thread-safe toolkit with instance-level configuration.
 
-    @classmethod
-    def update_config(cls, config):
-        """Update the class-level configuration."""
-        cls._config.update(config)
+    Each instance maintains its own isolated configuration, preventing
+    race conditions when multiple threads analyze different tickers.
+    """
+
+    def __init__(self, config=None):
+        """Initialize Toolkit with instance-level config.
+
+        Args:
+            config: Optional configuration dict. If None, uses DEFAULT_CONFIG.
+        """
+        # Instance-level config - each thread gets its own copy
+        self._config = (config or DEFAULT_CONFIG).copy()
+
+    def update_config(self, config):
+        """Update this instance's configuration.
+
+        Args:
+            config: Dictionary of configuration values to update.
+        """
+        self._config.update(config)
+
+    def get_config(self):
+        """Get a copy of this instance's configuration.
+
+        Returns:
+            Copy of the configuration dict to prevent external mutation.
+        """
+        return self._config.copy()
 
     @property
     def config(self):
         """Access the configuration."""
         return self._config
-
-    def __init__(self, config=None):
-        if config:
-            self.update_config(config)
 
     @staticmethod
     @tool
@@ -630,7 +701,7 @@ class Toolkit:
 
     @staticmethod
     @tool
-    @timing_wrapper("NEWS")
+    @timing_wrapper("NEWS", timeout_seconds=480)  # 8 min timeout for parallel web searches (7 searches × ~60s each)
     def get_global_news_openai(
         curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
         ticker_context: Annotated[str, "Ticker symbol for context-aware news (e.g., ETH/USD, AAPL)"] = None,
@@ -639,11 +710,11 @@ class Toolkit:
         Retrieve the latest global news relevant to the asset being analyzed using OpenAI with web search.
         For crypto assets (BTC, ETH, etc.), focuses on crypto-relevant global news like regulation, institutional adoption, DeFi developments.
         For stocks, focuses on macro-economic and sector-specific global news.
-        
+
         Args:
             curr_date (str): Current date in yyyy-mm-dd format
             ticker_context (str): Ticker symbol to provide context for relevant news (e.g., ETH/USD for crypto, AAPL for stocks)
-            
+
         Returns:
             str: A formatted string containing the latest relevant global news for the asset being analyzed.
         """
@@ -654,7 +725,7 @@ class Toolkit:
 
     @staticmethod
     @tool
-    @timing_wrapper("FUNDAMENTALS")
+    @timing_wrapper("FUNDAMENTALS", timeout_seconds=300)  # 5 min timeout for web search with reasoning
     def get_fundamentals_openai(
         ticker: Annotated[str, "the company's ticker"],
         curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],

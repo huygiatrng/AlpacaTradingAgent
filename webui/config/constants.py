@@ -22,9 +22,12 @@ COLORS = {
 # Refresh intervals (in milliseconds)
 REFRESH_INTERVALS = {
     "fast": 2000,      # 2 seconds for critical updates during analysis
-    "medium": 10000,   # 5 seconds for reports (reduced frequency for less interference)  
+    "medium": 10000,   # 5 seconds for reports (reduced frequency for less interference)
     "slow": 60000,    # 1 minutes for account data (was 30 seconds)
 }
+
+# Debounce duration to prevent auto-refresh from overriding user symbol selection
+SYMBOL_CLICK_DEBOUNCE_SECONDS = 10  # Don't override user clicks for 10 seconds
 
 # App configuration
 APP_CONFIG = {
