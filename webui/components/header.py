@@ -11,7 +11,7 @@ def create_header():
         dbc.CardBody([
             dbc.Row([
                 dbc.Col([
-                    html.H1("AlpacaTradingAgent 📊 - Multi-Agents LLM Financial Trading Framework",
+                    html.H1("AlpacaTradingAgent",
                             className="text-center mb-0")
                 ], width=10),
                 dbc.Col([
