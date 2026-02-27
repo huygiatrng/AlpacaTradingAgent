@@ -145,6 +145,19 @@ def execute_trade_after_analysis(ticker, allow_shorts, trade_amount, use_ai_sizi
         final_stop_loss = stop_loss if use_stop_loss else None
         final_take_profit = targets if use_take_profit else None
 
+        # R/R guard: if stops/brackets are enabled but prices failed validation
+        # (R/R < 2:1, bad direction, or extraction failed entirely), reject the
+        # whole trade rather than entering unprotected.
+        if (use_stop_loss or use_bracket_orders) and approved_prices is None and recommended_action.upper() not in ("NEUTRAL", "HOLD"):
+            trader_prices = full_state.get("recommended_trading_prices", {})
+            if trader_prices and not trader_prices.get("fallback_used", True):
+                reason = "price validation failed (R/R < 2:1 or invalid levels)"
+            else:
+                reason = "no valid stop/target prices extracted from analysis"
+            print(f"[TRADE] ❌ {ticker}: Trade REJECTED — {reason}. Signal was {recommended_action}.")
+            state["trading_results"] = {"error": f"Trade skipped — {reason}", "signal": recommended_action}
+            return
+
         print(f"[TRADE] ═══════════════════════════════════════════════════")
         print(f"[TRADE] Executing trade for {ticker}:")
         print(f"[TRADE]   Signal: {recommended_action}")
