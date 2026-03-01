@@ -5,7 +5,7 @@ webui/components/alpaca_account.py - Alpaca account information components
 import dash_bootstrap_components as dbc
 from dash import html, dcc
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import pytz
 from tradingagents.dataflows.alpaca_utils import AlpacaUtils
 from tradingagents.dataflows.alpaca_exceptions import AlpacaAuthError
@@ -158,10 +158,11 @@ def render_positions_table():
             ], className="text-center p-4")
         ], className="enhanced-table-container error-state")
 
-def render_orders_table(page=1, page_size=7):
-    """Render the enhanced recent orders table"""
+def render_orders_table(orders_data=None):
+    """Render the enhanced recent orders with card-based timeline view"""
     try:
-        orders_data = AlpacaUtils.get_recent_orders(page=page, page_size=page_size)
+        if orders_data is None:
+            orders_data = AlpacaUtils.get_recent_orders(limit=100)
 
         if not orders_data:
             return html.Div([
@@ -172,134 +173,205 @@ def render_orders_table(page=1, page_size=7):
                 ], className="text-center p-5")
             ], className="enhanced-table-container")
 
-        # Group orders by Asset (preserve insertion order)
-        groups = {}
+        # --- timestamp helpers ---
+        _EPOCH = datetime(2000, 1, 1, tzinfo=timezone.utc)
+
+        def _parse_dt(iso_str):
+            if not iso_str:
+                return None
+            try:
+                dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+            except Exception:
+                return None
+
+        now = datetime.now(timezone.utc)
+        today = now.date()
+        yesterday = (now - timedelta(days=1)).date()
+        week_start = today - timedelta(days=today.weekday())
+
+        # Attach parsed datetimes
         for order in orders_data:
-            asset = order.get("Asset", "")
-            if asset not in groups:
-                groups[asset] = []
-            groups[asset].append(order)
+            order["_submitted_dt"] = _parse_dt(order.get("submitted_at"))
 
-        # Create enhanced table rows
-        table_rows = []
-        row_counter = 0
-        for asset, asset_orders in groups.items():
-            is_group = len(asset_orders) > 1
+        # Sort newest-first
+        orders_sorted = sorted(
+            orders_data,
+            key=lambda o: o["_submitted_dt"] or _EPOCH,
+            reverse=True,
+        )
 
-            if is_group:
-                # Determine position direction from dominant side
-                sides = [str(o.get("Side", "")).lower() for o in asset_orders]
-                buy_count = sum(1 for s in sides if "buy" in s)
-                sell_count = sum(1 for s in sides if "sell" in s)
-                if sell_count > buy_count:
-                    group_label = "SHORT"
-                    label_class = "text-danger"
-                    icon_class = "fas fa-arrow-down me-1"
-                elif buy_count > sell_count:
-                    group_label = "LONG"
-                    label_class = "text-success"
-                    icon_class = "fas fa-arrow-up me-1"
+        # --- bracket grouping: same symbol, submitted within 60 seconds ---
+        def _build_groups(orders_list):
+            groups = []
+            used = set()
+            for i, order in enumerate(orders_list):
+                if i in used:
+                    continue
+                used.add(i)
+                group = [order]
+                if order["_submitted_dt"] is not None:
+                    for j, other in enumerate(orders_list):
+                        if j in used:
+                            continue
+                        if (other["Asset"] == order["Asset"]
+                                and other["_submitted_dt"] is not None):
+                            diff = abs((other["_submitted_dt"] - order["_submitted_dt"]).total_seconds())
+                            if diff <= 60:
+                                group.append(other)
+                                used.add(j)
+                groups.append(group)
+            return groups
+
+        def _get_bucket(order):
+            dt = order.get("_submitted_dt")
+            if dt is None:
+                return "Older"
+            d = dt.date()
+            if d == today:
+                return "Today"
+            elif d == yesterday:
+                return "Yesterday"
+            elif d >= week_start:
+                return "This Week"
+            return "Older"
+
+        all_groups = _build_groups(orders_sorted)
+
+        bucket_order = ["Today", "Yesterday", "This Week", "Older"]
+        buckets = {b: [] for b in bucket_order}
+        for group in all_groups:
+            buckets[_get_bucket(group[0])].append(group)
+
+        # --- rendering helpers ---
+        def _side_display(side_str):
+            """Return (label, css_color_class, italic)"""
+            s = side_str.lower()
+            if s == "sell_short":
+                return "SELL SHORT", "text-danger", True
+            elif s == "buy_to_cover":
+                return "BUY TO COVER", "text-success", True
+            elif "sell" in s:
+                return "SELL", "text-danger", False
+            return "BUY", "text-success", False
+
+        def _render_order_card(order, is_child=False):
+            side_str = str(order.get("Side", "")).lower()
+            side_label, side_color, is_italic = _side_display(side_str)
+
+            status_str = str(order.get("Status", "")).lower()
+            status_map = {
+                "filled": ("success", "Filled"),
+                "canceled": ("danger", "Canceled"),
+                "cancelled": ("danger", "Canceled"),
+                "pending_new": ("warning", "Pending"),
+                "new": ("info", "New"),
+                "accepted": ("info", "Accepted"),
+                "rejected": ("danger", "Rejected"),
+                "partially_filled": ("warning", "Partial"),
+                "held": ("warning", "Held"),
+                "done_for_day": ("secondary", "Done"),
+                "expired": ("secondary", "Expired"),
+            }
+            status_color, status_text = status_map.get(status_str, ("secondary", str(order.get("Status", "-"))))
+
+            qty = order.get("Qty", 0)
+            filled_qty = order.get("Filled Qty", 0)
+            avg_price = order.get("Avg. Fill Price", "-")
+            order_type_raw = str(order.get("Order Type", ""))
+            order_type = order_type_raw.replace("_", " ").title()
+
+            dt = order.get("_submitted_dt")
+            if dt:
+                ts_str = dt.strftime("%H:%M") if dt.date() == today else dt.strftime("%b %d")
+            else:
+                ts_str = "-"
+
+            side_elem = html.Span(
+                html.I(side_label) if is_italic else side_label,
+                className=f"order-side-pill {side_color}",
+            )
+
+            qty_text = f"{qty}"
+            if filled_qty and float(filled_qty) != float(qty):
+                qty_text = f"{filled_qty}/{qty}"
+
+            card_class = "order-card bracket-child" if is_child else "order-card"
+            return html.Div([
+                html.Div([
+                    html.Span(order["Asset"], className="order-symbol"),
+                    html.Br(),
+                    html.Small(order_type, className="text-muted"),
+                ], className="order-card-left"),
+                html.Div([
+                    side_elem,
+                    html.Span(f" {qty_text} shs", className="text-muted ms-1 small"),
+                ], className="order-card-middle"),
+                html.Div([
+                    html.Span(status_text, className=f"order-status-badge badge bg-{status_color}"),
+                    html.Br(),
+                    html.Small(avg_price, className="fw-bold"),
+                    html.Span(" · ", className="text-muted"),
+                    html.Small(ts_str, className="text-muted"),
+                ], className="order-card-right"),
+            ], className=card_class)
+
+        def _render_bracket_header(group):
+            sides_lower = [str(o.get("Side", "")).lower() for o in group]
+            sells = [s for s in sides_lower if "sell" in s]  # captures sell, sell_short
+            buys  = [s for s in sides_lower if "buy"  in s]  # captures buy, buy_to_cover
+
+            if any("sell_short" in s for s in sides_lower):
+                group_label, label_class, icon_class = "SHORT", "text-danger", "fas fa-arrow-down me-1"
+            elif len(sells) > 0 and len(sells) < len(buys):
+                # 1 sell entry + N buy legs → short bracket
+                group_label, label_class, icon_class = "SHORT", "text-danger", "fas fa-arrow-down me-1"
+            elif len(buys) > 0 and len(buys) < len(sells):
+                # 1 buy entry + N sell legs → long bracket
+                group_label, label_class, icon_class = "LONG", "text-success", "fas fa-arrow-up me-1"
+            elif len(buys) >= len(sells):
+                group_label, label_class, icon_class = "LONG", "text-success", "fas fa-arrow-up me-1"
+            else:
+                group_label, label_class, icon_class = "SHORT", "text-danger", "fas fa-arrow-down me-1"
+
+            return html.Div([
+                html.Span(group[0]["Asset"], className="order-symbol me-2"),
+                html.Span([
+                    html.I(className=icon_class),
+                    group_label,
+                ], className=f"order-group-badge {label_class} me-2"),
+                html.Span(f"{len(group)} legs", className="order-group-count"),
+            ], className="order-bracket-header")
+
+        # --- assemble timeline content ---
+        total_orders = len(orders_data)
+        content_items = [
+            html.Div(
+                html.Span(f"{total_orders} orders", className="badge bg-secondary"),
+                className="mb-2",
+            )
+        ]
+
+        for bucket_name in bucket_order:
+            groups = buckets[bucket_name]
+            if not groups:
+                continue
+            content_items.append(html.Div(bucket_name, className="orders-date-header"))
+            for group in groups:
+                if len(group) > 1:
+                    content_items.append(_render_bracket_header(group))
+                    for order in group:
+                        content_items.append(_render_order_card(order, is_child=True))
                 else:
-                    group_label = "MIXED"
-                    label_class = "text-warning"
-                    icon_class = "fas fa-arrows-alt-v me-1"
+                    content_items.append(_render_order_card(group[0], is_child=False))
 
-                header_row = html.Tr([
-                    html.Td([
-                        html.Div([
-                            html.Span(asset, className="fw-bold symbol-text me-2"),
-                            html.Span([
-                                html.I(className=icon_class),
-                                group_label
-                            ], className=f"order-group-badge {label_class} me-2"),
-                            html.Span(f"{len(asset_orders)} orders", className="order-group-count"),
-                        ], className="d-flex align-items-center gap-1")
-                    ], colSpan=5)
-                ], className="order-group-header")
-                table_rows.append(header_row)
-
-            for idx, order in enumerate(asset_orders):
-                # Status color coding
-                status_color = {
-                    "filled": "text-success",
-                    "canceled": "text-danger",
-                    "pending_new": "text-warning",
-                    "accepted": "text-info",
-                    "rejected": "text-danger"
-                }.get(str(order.get("Status", "")).lower(), "text-muted")
-
-                # Side color coding
-                side_str = str(order.get("Side", "")).lower()
-                side_color = "text-success" if "buy" in side_str else "text-danger"
-
-                row_class = "table-row-hover order-group-child" if is_group else "table-row-hover"
-                row = html.Tr([
-                    html.Td([
-                        html.Div([
-                            html.Strong(order["Asset"], className="symbol-text"),
-                            html.Br(),
-                            html.Small(order["Order Type"], className="text-muted")
-                        ])
-                    ], className="symbol-cell"),
-                    html.Td([
-                        html.Div([
-                            html.Span(str(order["Side"]), className=f"fw-bold {side_color}"),
-                            html.Br(),
-                            html.Small(f"{order['Qty']} shares", className="text-muted")
-                        ])
-                    ], className="side-cell"),
-                    html.Td([
-                        html.Div([
-                            html.Div(f"{order['Filled Qty']}", className="fw-bold"),
-                            html.Small("filled", className="text-muted")
-                        ])
-                    ], className="filled-cell"),
-                    html.Td([
-                        html.Div([
-                            html.Div(order["Avg. Fill Price"], className="fw-bold"),
-                            html.Small("avg price", className="text-muted")
-                        ])
-                    ], className="price-cell"),
-                    html.Td([
-                        html.Span([
-                            html.I(className=f"fas fa-circle me-1 {status_color}"),
-                            str(order["Status"])
-                        ], className=f"status-badge {status_color}")
-                    ], className="status-cell")
-                ], className=row_class, id=f"order-row-{order.get('Asset', '')}-{page}-{row_counter}")
-
-                table_rows.append(row)
-                row_counter += 1
-
-        # Create enhanced table with pagination
-        table = html.Div([
-            html.Table([
-                html.Thead([
-                    html.Tr([
-                        html.Th("Asset", className="table-header"),
-                        html.Th("Side & Qty", className="table-header"),
-                        html.Th("Filled", className="table-header"),
-                        html.Th("Avg Price", className="table-header"),
-                        html.Th("Status", className="table-header")
-                    ])
-                ]),
-                html.Tbody(table_rows)
-            ], className="enhanced-table"),
-            html.Div([
-                dbc.Pagination(
-                    id="orders-pagination",
-                    max_value=10,
-                    active_page=page,
-                    size="sm",
-                    className="mt-3"
-                )
-            ], className="d-flex justify-content-end")
+        return html.Div([
+            html.Div(content_items, className="orders-timeline"),
         ], className="enhanced-table-container")
 
-        return table
-
     except AlpacaAuthError as e:
-        # Show specific auth error message
         return html.Div([
             html.Div([
                 html.I(className="fas fa-key fa-2x mb-3 text-danger"),
@@ -319,6 +391,7 @@ def render_orders_table(page=1, page_size=7):
             ], className="text-center p-4")
         ], className="enhanced-table-container error-state")
 
+
 def render_account_summary():
     """Render account summary information"""
     try:
@@ -329,7 +402,6 @@ def render_account_summary():
         daily_change_dollars = account_info["daily_change_dollars"]
         daily_change_percent = account_info["daily_change_percent"]
 
-        # Determine value class for daily change based on whether it's positive or negative
         daily_change_class = "positive" if daily_change_dollars >= 0 else "negative"
         change_icon = "fas fa-arrow-up" if daily_change_dollars >= 0 else "fas fa-arrow-down"
 
@@ -371,7 +443,6 @@ def render_account_summary():
         return summary
 
     except AlpacaAuthError as e:
-        # Show specific auth error message with actionable steps
         return html.Div([
             html.Div([
                 html.I(className="fas fa-key fa-2x mb-3 text-danger"),
@@ -407,6 +478,7 @@ def render_account_summary():
             ], className="text-center p-4")
         ], className="enhanced-account-summary error-state")
 
+
 def get_positions_data():
     """Get positions data for table callback"""
     try:
@@ -415,10 +487,11 @@ def get_positions_data():
         print(f"Error getting positions data: {e}")
         return []
 
-def get_recent_orders(page=1, page_size=7):
-    """Get recent orders data for table callback"""
+
+def get_recent_orders(limit=100):
+    """Get recent orders data"""
     try:
-        return AlpacaUtils.get_recent_orders(page=page, page_size=page_size)
+        return AlpacaUtils.get_recent_orders(limit=limit)
     except Exception as e:
         print(f"Error getting orders data: {e}")
         return []

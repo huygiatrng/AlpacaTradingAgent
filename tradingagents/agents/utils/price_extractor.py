@@ -64,10 +64,14 @@ def extract_trading_prices(text: str, current_price: float = None) -> dict:
     match = re.search(pattern_entry, text, re.IGNORECASE)
     if match:
         entry_str = match.group(1).replace(',', '')
-        result["entry_price"] = float(entry_str)
-        result["extraction_method"] = "explicit_prices"
-        result["confidence"] = "high"
-        print(f"[PRICE EXTRACTOR] ✅ Found entry price: ${result['entry_price']:.2f} (matched: '{match.group(0)}')")
+        parsed_float = float(entry_str)
+        if parsed_float <= 0:
+            print(f"[PRICE EXTRACTOR] ⚠️ Extracted $0.00 price, ignoring")
+        else:
+            result["entry_price"] = parsed_float
+            result["extraction_method"] = "explicit_prices"
+            result["confidence"] = "high"
+            print(f"[PRICE EXTRACTOR] ✅ Found entry price: ${result['entry_price']:.2f} (matched: '{match.group(0)}')")
     else:
         print("[PRICE EXTRACTOR] ⚠️ No entry price found")
 
@@ -78,11 +82,15 @@ def extract_trading_prices(text: str, current_price: float = None) -> dict:
     match = re.search(pattern_stop, text, re.IGNORECASE)
     if match:
         stop_str = match.group(1).replace(',', '')
-        result["stop_loss"] = float(stop_str)
-        if result["extraction_method"] is None:
-            result["extraction_method"] = "explicit_prices"
-        result["confidence"] = "high"
-        print(f"[PRICE EXTRACTOR] ✅ Found stop loss: ${result['stop_loss']:.2f} (matched: '{match.group(0)}')")
+        parsed_float = float(stop_str)
+        if parsed_float <= 0:
+            print(f"[PRICE EXTRACTOR] ⚠️ Extracted $0.00 price, ignoring")
+        else:
+            result["stop_loss"] = parsed_float
+            if result["extraction_method"] is None:
+                result["extraction_method"] = "explicit_prices"
+            result["confidence"] = "high"
+            print(f"[PRICE EXTRACTOR] ✅ Found stop loss: ${result['stop_loss']:.2f} (matched: '{match.group(0)}')")
     else:
         print("[PRICE EXTRACTOR] ⚠️ No stop loss found with primary pattern")
 
@@ -93,11 +101,15 @@ def extract_trading_prices(text: str, current_price: float = None) -> dict:
     match = re.search(pattern_target1, text, re.IGNORECASE)
     if match:
         target_str = match.group(1).replace(',', '')
-        result["targets"].append(float(target_str))
-        if result["extraction_method"] is None:
-            result["extraction_method"] = "explicit_prices"
-        result["confidence"] = "high"
-        print(f"[PRICE EXTRACTOR] ✅ Found target 1: ${result['targets'][0]:.2f} (matched: '{match.group(0)}')")
+        parsed_float = float(target_str)
+        if parsed_float <= 0:
+            print(f"[PRICE EXTRACTOR] ⚠️ Extracted $0.00 price, ignoring")
+        else:
+            result["targets"].append(parsed_float)
+            if result["extraction_method"] is None:
+                result["extraction_method"] = "explicit_prices"
+            result["confidence"] = "high"
+            print(f"[PRICE EXTRACTOR] ✅ Found target 1: ${result['targets'][0]:.2f} (matched: '{match.group(0)}')")
     else:
         print("[PRICE EXTRACTOR] ⚠️ No target 1 found")
 
@@ -106,11 +118,15 @@ def extract_trading_prices(text: str, current_price: float = None) -> dict:
     match = re.search(pattern_target2, text, re.IGNORECASE)
     if match:
         target_str = match.group(1).replace(',', '')
-        result["targets"].append(float(target_str))
-        if result["extraction_method"] is None:
-            result["extraction_method"] = "explicit_prices"
-        result["confidence"] = "high"
-        print(f"[PRICE EXTRACTOR] ✅ Found target 2: ${result['targets'][-1]:.2f} (matched: '{match.group(0)}')")
+        parsed_float = float(target_str)
+        if parsed_float <= 0:
+            print(f"[PRICE EXTRACTOR] ⚠️ Extracted $0.00 price, ignoring")
+        else:
+            result["targets"].append(parsed_float)
+            if result["extraction_method"] is None:
+                result["extraction_method"] = "explicit_prices"
+            result["confidence"] = "high"
+            print(f"[PRICE EXTRACTOR] ✅ Found target 2: ${result['targets'][-1]:.2f} (matched: '{match.group(0)}')")
     else:
         print("[PRICE EXTRACTOR] ⚠️ No target 2 found")
 
@@ -121,11 +137,15 @@ def extract_trading_prices(text: str, current_price: float = None) -> dict:
         match = re.search(pattern_single_target, text, re.IGNORECASE)
         if match:
             target_str = match.group(1).replace(',', '')
-            result["targets"].append(float(target_str))
-            if result["extraction_method"] is None:
-                result["extraction_method"] = "explicit_prices"
-            result["confidence"] = "high"
-            print(f"[PRICE EXTRACTOR] ✅ Found single target: ${result['targets'][0]:.2f} (matched: '{match.group(0)}')")
+            parsed_float = float(target_str)
+            if parsed_float <= 0:
+                print(f"[PRICE EXTRACTOR] ⚠️ Extracted $0.00 price, ignoring")
+            else:
+                result["targets"].append(parsed_float)
+                if result["extraction_method"] is None:
+                    result["extraction_method"] = "explicit_prices"
+                result["confidence"] = "high"
+                print(f"[PRICE EXTRACTOR] ✅ Found single target: ${result['targets'][0]:.2f} (matched: '{match.group(0)}')")
         else:
             print("[PRICE EXTRACTOR] ⚠️ No single target found")
 
@@ -137,10 +157,14 @@ def extract_trading_prices(text: str, current_price: float = None) -> dict:
         match = re.search(pattern_table_stop, text, re.IGNORECASE)
         if match:
             stop_str = match.group(1).replace(',', '')
-            result["stop_loss"] = float(stop_str)
-            result["extraction_method"] = "table_format"
-            result["confidence"] = "medium"
-            print(f"[PRICE EXTRACTOR] ✅ Found stop loss in table: ${result['stop_loss']:.2f}")
+            parsed_float = float(stop_str)
+            if parsed_float <= 0:
+                print(f"[PRICE EXTRACTOR] ⚠️ Extracted $0.00 price, ignoring")
+            else:
+                result["stop_loss"] = parsed_float
+                result["extraction_method"] = "table_format"
+                result["confidence"] = "medium"
+                print(f"[PRICE EXTRACTOR] ✅ Found stop loss in table: ${result['stop_loss']:.2f}")
         else:
             print("[PRICE EXTRACTOR] ⚠️ No stop loss in table format")
 
@@ -151,10 +175,14 @@ def extract_trading_prices(text: str, current_price: float = None) -> dict:
         match = re.search(pattern_table_target, text, re.IGNORECASE)
         if match:
             target_str = match.group(1).replace(',', '')
-            result["targets"].append(float(target_str))
-            result["extraction_method"] = "table_format"
-            result["confidence"] = "medium"
-            print(f"[PRICE EXTRACTOR] ✅ Found target in table: ${result['targets'][0]:.2f}")
+            parsed_float = float(target_str)
+            if parsed_float <= 0:
+                print(f"[PRICE EXTRACTOR] ⚠️ Extracted $0.00 price, ignoring")
+            else:
+                result["targets"].append(parsed_float)
+                result["extraction_method"] = "table_format"
+                result["confidence"] = "medium"
+                print(f"[PRICE EXTRACTOR] ✅ Found target in table: ${result['targets'][0]:.2f}")
         else:
             print("[PRICE EXTRACTOR] ⚠️ No target in table format")
 
@@ -170,10 +198,14 @@ def extract_trading_prices(text: str, current_price: float = None) -> dict:
             # For SHORT positions, the extracted stop will be in the wrong direction and will
             # correctly fail validate_trading_prices() — this is intentional to avoid placing
             # incorrect stops. SHORT stops must come from explicit prices in the AI output.
-            result["stop_loss"] = calculate_stop_loss_from_percent(current_price, pct, "long")
-            result["extraction_method"] = "percentage_based"
-            result["confidence"] = "medium"
-            print(f"[PRICE EXTRACTOR] ✅ Found percentage-based stop: {pct}% → ${result['stop_loss']:.2f}")
+            parsed_float = calculate_stop_loss_from_percent(current_price, pct, "long")
+            if parsed_float <= 0:
+                print(f"[PRICE EXTRACTOR] ⚠️ Extracted $0.00 price, ignoring")
+            else:
+                result["stop_loss"] = parsed_float
+                result["extraction_method"] = "percentage_based"
+                result["confidence"] = "medium"
+                print(f"[PRICE EXTRACTOR] ✅ Found percentage-based stop: {pct}% → ${result['stop_loss']:.2f}")
         else:
             print("[PRICE EXTRACTOR] ⚠️ No percentage-based stop found")
 
@@ -331,10 +363,11 @@ def validate_trading_prices(entry: float, stop: float, targets: list,
         rr_ratio = reward / risk if risk > 0 else 0
 
         if rr_ratio < 2.0:
-            warning = f"Risk/Reward ratio {rr_ratio:.2f}:1 below recommended 2:1"
-            print(f"[PRICE VALIDATION] {symbol}: WARNING - {warning}")
+            warning = f"Risk/Reward ratio {rr_ratio:.2f}:1 below minimum 2:1 — rejecting bracket prices"
+            print(f"[PRICE VALIDATION] {symbol}: ❌ {warning}")
             validated["warnings"].append(warning)
-            # Don't fail, just warn
+            validated["validation_passed"] = False
+            return None  # Hard fail — don't place bracket with sub-2:1 R/R
         else:
             print(f"[PRICE VALIDATION] {symbol}: Risk/Reward ratio {rr_ratio:.2f}:1 ✓")
 

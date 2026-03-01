@@ -27,7 +27,7 @@ REFRESH_INTERVALS = {
 }
 
 # Debounce duration to prevent auto-refresh from overriding user symbol selection
-SYMBOL_CLICK_DEBOUNCE_SECONDS = 10  # Don't override user clicks for 10 seconds
+SYMBOL_CLICK_DEBOUNCE_SECONDS = 0  # No debounce — update immediately
 
 # App configuration
 APP_CONFIG = {

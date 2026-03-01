@@ -160,7 +160,7 @@ def create_main_layout():
             header,
             alpaca_account_card,
             dbc.Row([
-                dbc.Col(config_card, md=6),
+                dbc.Col(config_card, xs=12, md=6),
                 dbc.Col([
                     chart_card,
                     html.Div(className="mb-3"),  # Add some spacing
@@ -169,7 +169,7 @@ def create_main_layout():
                     status_card,
                     html.Div(className="mb-3"),  # Add some spacing
                     decision_card,
-                ], md=6)
+                ], xs=12, md=6)
             ]),
             reports_card,
             html.Div(className="mt-4"),
@@ -179,7 +179,7 @@ def create_main_layout():
             create_debug_panel(),
         ],
         fluid=True,
-        className="p-4",
+        className="p-2 p-md-4",
         style={"backgroundColor": COLORS["background"]}
     )
 

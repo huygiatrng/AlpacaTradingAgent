@@ -27,29 +27,28 @@ def create_config_panel():
             dbc.Row([
                 dbc.Col([
                     dbc.Checkbox(id="analyst-market", label="Market Analyst", value=True, className="mb-2"),
-                ], width=6),
+                ], xs=12, sm=6),
                 dbc.Col([
                     dbc.Checkbox(id="analyst-social", label="Social Media Analyst", value=True, className="mb-2"),
-                ], width=6),
+                ], xs=12, sm=6),
             ]),
             dbc.Row([
                 dbc.Col([
                     dbc.Checkbox(id="analyst-news", label="News Analyst", value=True, className="mb-2"),
-                ], width=6),
+                ], xs=12, sm=6),
                 dbc.Col([
                     dbc.Checkbox(id="analyst-fundamentals", label="Fundamentals Analyst", value=True, className="mb-2"),
-                ], width=6),
+                ], xs=12, sm=6),
             ]),
             dbc.Row([
                 dbc.Col([
                     dbc.Checkbox(id="analyst-macro", label="Macro Analyst", value=True, className="mb-2"),
-                ], width=6),
+                ], xs=12, sm=6),
                 dbc.Col([
                     # Empty column for alignment
-                ], width=6),
+                ], xs=12, sm=6),
             ]),
             html.H5("Research Depth:", className="mt-3"),
-            # 50/50 split for research depth selection and information
             dbc.Row([
                 dbc.Col([
                     dbc.RadioItems(
@@ -63,13 +62,11 @@ def create_config_panel():
                         inline=False,
                         className="mb-3"
                     ),
-                ], width=6),
+                ], xs=12, sm=6),
                 dbc.Col([
-                    # Interactive research depth information
                     html.Div(id="research-depth-info", className="mb-3"),
-                ], width=6),
+                ], xs=12, sm=6),
             ]),
-            # Execution Mode section removed - always use sequential execution
             html.H5("Trading Mode:", className="mt-3"),
             dbc.Row([
                 dbc.Col([
@@ -79,10 +76,10 @@ def create_config_panel():
                         value=False,
                         className="mb-2"
                     ),
-                ], width=6),
+                ], xs=12, sm=6),
                 dbc.Col([
                     html.Div(id="trading-mode-info", className="mb-3"),
-                ], width=6),
+                ], xs=12, sm=6),
             ]),
             html.H5("Execution Mode:", className="mt-3"),
             dbc.Row([
@@ -90,13 +87,13 @@ def create_config_panel():
                     dbc.Switch(
                         id="parallel-execution",
                         label="Enable Parallel Analyst Execution",
-                        value=False,  # Default to disabled for more reliable execution
+                        value=False,
                         className="mb-2"
                     ),
-                ], width=6),
+                ], xs=12, sm=6),
                 dbc.Col([
                     html.Div(id="parallel-execution-info", className="mb-3"),
-                ], width=6),
+                ], xs=12, sm=6),
             ]),
             html.H5("Parallel Batch Configuration:", className="mt-3"),
             dbc.Row([
@@ -111,7 +108,7 @@ def create_config_panel():
                         max=20,
                         className="mb-2"
                     ),
-                ], width=6),
+                ], xs=12, sm=6),
                 dbc.Col([
                     dbc.Label("Batch Delay (seconds between batches)", className="mb-1"),
                     dbc.Input(
@@ -123,7 +120,7 @@ def create_config_panel():
                         max=60,
                         className="mb-2"
                     ),
-                ], width=6),
+                ], xs=12, sm=6),
             ]),
             dbc.Row([
                 dbc.Col([
@@ -139,7 +136,7 @@ def create_config_panel():
                         value=False,
                         className="mb-2"
                     ),
-                ], width=6),
+                ], xs=12, sm=6),
                 dbc.Col([
                     dbc.Label("Loop Interval (minutes)", className="mb-1"),
                     dbc.Input(
@@ -148,10 +145,10 @@ def create_config_panel():
                         placeholder="60",
                         value=60,
                         min=1,
-                        max=1440,  # Max 24 hours
+                        max=1440,
                         className="mb-2"
                     ),
-                ], width=6),
+                ], xs=12, sm=6),
             ]),
             dbc.Row([
                 dbc.Col([
@@ -161,7 +158,7 @@ def create_config_panel():
                         value=False,
                         className="mb-2"
                     ),
-                ], width=6),
+                ], xs=12, sm=6),
                 dbc.Col([
                     dbc.Label("Trading Hours (e.g., 10,15 for 10AM & 3PM)", className="mb-1"),
                     dbc.Input(
@@ -171,11 +168,9 @@ def create_config_panel():
                         value="",
                         className="mb-2"
                     ),
-                ], width=6),
+                ], xs=12, sm=6),
             ]),
-            # Market hours validation message
             html.Div(id="market-hours-validation", className="mb-2"),
-            # Add scheduling mode information display
             html.Div(id="scheduling-mode-info", className="mb-3"),
             html.H5("Automated Trading:", className="mt-3"),
             dbc.Row([
@@ -186,15 +181,15 @@ def create_config_panel():
                         value=False,
                         className="mb-2"
                     ),
-                ], width=6),
+                ], xs=12, sm=6),
                 dbc.Col([
                     dbc.Switch(
                         id="ai-position-sizing",
                         label="AI-Determined Position Sizing",
-                        value=True,  # Default enabled
+                        value=True,
                         className="mb-2"
                     ),
-                ], width=6),
+                ], xs=12, sm=6),
             ]),
             html.Small("AI agents determine trade size based on risk analysis", className="text-muted mb-2"),
             dbc.Row([
@@ -215,30 +210,28 @@ def create_config_panel():
                     ),
                 ], width=12),
             ]),
-            # Add trading mode information display
             html.Div(id="trade-after-analyze-info", className="mb-3"),
 
-            # Order Protection Settings
             html.H5("Order Protection:", className="mt-3"),
             dbc.Row([
                 dbc.Col([
                     dbc.Switch(
                         id="use-stop-loss",
                         label="Use Stop Loss Orders",
-                        value=True,  # Default enabled
+                        value=True,
                         className="mb-2"
                     ),
                     html.Small("Place automatic stop loss orders based on AI analysis", className="text-muted d-block mb-2"),
-                ], width=6),
+                ], xs=12, sm=6),
                 dbc.Col([
                     dbc.Switch(
                         id="use-take-profit",
                         label="Use Take Profit Orders",
-                        value=True,  # Default enabled
+                        value=True,
                         className="mb-2"
                     ),
                     html.Small("Place automatic take profit orders based on AI analysis", className="text-muted d-block mb-2"),
-                ], width=6),
+                ], xs=12, sm=6),
             ]),
             dbc.Row([
                 dbc.Col([
@@ -297,7 +290,6 @@ def create_config_panel():
                 value="gpt-5.2-2025-12-11",
                 className="mb-3"
             ),
-            # Dynamic Start/Stop button
             html.Div(id="control-button-container", children=[
                 dbc.Button(
                     "Start Analysis",

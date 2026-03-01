@@ -8,6 +8,7 @@ import dash.dependencies
 import json
 
 from webui.components.alpaca_account import render_positions_table, render_orders_table, render_account_summary
+from tradingagents.dataflows.alpaca_utils import AlpacaUtils
 
 
 def register_trading_callbacks(app):
@@ -19,16 +20,17 @@ def register_trading_callbacks(app):
          Output("account-summary-container", "children")],
         [Input("slow-refresh-interval", "n_intervals"),
          Input("refresh-btn", "n_clicks"),
-         Input("refresh-alpaca-btn", "n_clicks"),
-         Input("orders-pagination", "active_page")]
+         Input("refresh-alpaca-btn", "n_clicks")]
     )
-    def update_enhanced_alpaca_tables(n_intervals, n_clicks, alpaca_refresh, orders_page):
+    def update_enhanced_alpaca_tables(n_intervals, n_clicks, alpaca_refresh):
         """Update the enhanced positions and orders tables"""
-
-        page = orders_page if orders_page is not None else 1
+        try:
+            orders_data = AlpacaUtils.get_recent_orders(limit=100)
+        except Exception:
+            orders_data = None
 
         positions_table = render_positions_table()
-        orders_table = render_orders_table(page=page)
+        orders_table = render_orders_table(orders_data=orders_data)
 
         return positions_table, orders_table, render_account_summary()
 

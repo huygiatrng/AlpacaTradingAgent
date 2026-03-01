@@ -1,0 +1,9 @@
+{
+  "metadata": {
+    "function": "get_earnings_calendar",
+    "args": "('AMZN', '2026-01-01', '2026-03-31')",
+    "kwargs": "{}",
+    "cached_at": "2026-02-27T16:26:47.882928"
+  },
+  "data": "## AMZN Earnings Calendar (2026-01-01 to 2026-03-31)\n\n**Data Source:** Yahoo Finance (via yfinance)\n\n### 2026-02-05\n- **EPS Estimate**: 1.95\n- **EPS Reported**: 1.95\n- **Surprise**: 0.0000 (+0.00%)\n\n"
+}

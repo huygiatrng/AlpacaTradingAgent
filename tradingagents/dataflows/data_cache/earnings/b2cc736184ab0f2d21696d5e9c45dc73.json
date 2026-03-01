@@ -3,7 +3,7 @@
     "function": "get_earnings_calendar",
     "args": "('BAC', '2025-11-01', '2026-03-31')",
     "kwargs": "{}",
-    "cached_at": "2026-02-24T10:32:24.546130"
+    "cached_at": "2026-02-27T18:18:29.892956"
   },
-  "data": "## BAC Earnings Calendar (2025-11-01 to 2026-03-31)\n\n**Data Source:** Yahoo Finance (via yfinance)\n\n### 2026-01-14\n- **EPS Estimate**: 0.95\n- **EPS Reported**: 0.98\n- **Surprise**: 0.0300 (+3.16%)\n\n"
+  "data": "## BAC Earnings Calendar (2025-11-01 to 2026-03-31)\n\n**Data Source:** Yahoo Finance (via yfinance)\n\n### 2026-01-14\n- **EPS Estimate**: 0.96\n- **EPS Reported**: 0.98\n- **Surprise**: 0.0200 (+2.08%)\n\n"
 }

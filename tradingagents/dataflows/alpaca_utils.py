@@ -344,11 +344,11 @@ class AlpacaUtils:
             return []
 
     @staticmethod
-    def get_recent_orders(page=1, page_size=7):
-        """Get recent orders from Alpaca account, with simple pagination."""
+    def get_recent_orders(limit=100):
+        """Get recent orders from Alpaca account, up to `limit` orders."""
         try:
             client = get_alpaca_trading_client()
-            req = GetOrdersRequest(status="all", limit=page_size * page, nested=False)
+            req = GetOrdersRequest(status="all", limit=limit, nested=False)
             orders_page = client.get_orders(req)
             orders = list(orders_page)
 
@@ -359,20 +359,24 @@ class AlpacaUtils:
                 filled_qty = float(order.filled_qty) if order.filled_qty is not None else 0.0
                 filled_avg_price = float(order.filled_avg_price) if order.filled_avg_price is not None else 0.0
 
+                # Timestamps as ISO strings (or None)
+                submitted_at = order.submitted_at.isoformat() if order.submitted_at is not None else None
+                filled_at = order.filled_at.isoformat() if order.filled_at is not None else None
+
                 orders_data.append({
                     "Asset": order.symbol,
-                    "Order Type": order.type,
-                    "Side": order.side,
+                    "Order Type": str(order.type.value) if hasattr(order.type, "value") else str(order.type),
+                    "Side": str(order.side.value) if hasattr(order.side, "value") else str(order.side),
                     "Qty": qty,
                     "Filled Qty": filled_qty,
                     "Avg. Fill Price": f"${filled_avg_price:.2f}" if filled_avg_price > 0 else "-",
-                    "Status": order.status,
-                    "Source": order.client_order_id
+                    "Status": str(order.status.value) if hasattr(order.status, "value") else str(order.status),
+                    "Source": order.client_order_id,
+                    "submitted_at": submitted_at,
+                    "filled_at": filled_at,
                 })
 
-            # Now slice out the exact page we want (newest first)
-            start = (page - 1) * page_size
-            return orders_data[start : start + page_size]
+            return orders_data
 
         except Exception as e:
             # Check if this is an authentication error
@@ -405,6 +409,8 @@ class AlpacaUtils:
             return {
                 "buying_power": buying_power,
                 "cash": cash,
+                "equity": equity,
+                "last_equity": last_equity,
                 "daily_change_dollars": daily_change_dollars,
                 "daily_change_percent": daily_change_percent
             }
@@ -420,6 +426,8 @@ class AlpacaUtils:
             return {
                 "buying_power": 0,
                 "cash": 0,
+                "equity": 0,
+                "last_equity": 0,
                 "daily_change_dollars": 0,
                 "daily_change_percent": 0
             } 
@@ -497,9 +505,15 @@ class AlpacaUtils:
             # Determine order side
             order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
             
-            # Determine proper time-in-force: crypto orders only allow GTC
-            is_crypto = "/" in symbol.upper()
-            tif = TimeInForce.GTC if is_crypto else TimeInForce.DAY
+            # Determine proper time-in-force. GTC is used for both equity and crypto:
+            # - Crypto requires GTC (DAY is not accepted by Alpaca for crypto).
+            # - Equity market orders fill immediately in practice during regular hours,
+            #   so GTC vs DAY makes no observable difference for normal fills. However,
+            #   using GTC here is consistent with the standalone stop/limit helpers and
+            #   avoids a subtle edge case: if place_market_order is called just before
+            #   market close, a DAY order could expire unfilled, leaving any subsequently
+            #   placed protective orders associated with zero shares.
+            tif = TimeInForce.GTC  # GTC for both equity and crypto
 
             # Create market order request
             if notional and notional > 0:
@@ -599,12 +613,14 @@ class AlpacaUtils:
         """
         try:
             client = get_alpaca_trading_client()
-            is_crypto = "/" in symbol.upper()
 
             # Normalize symbol for Alpaca
             alpaca_symbol = symbol.upper().replace("/", "")
 
-            time_in_force = TimeInForce.GTC if is_crypto else TimeInForce.DAY
+            # GTC: stop loss must remain active overnight after an intraday entry fill.
+            # With DAY, this order would expire at session close, leaving the position
+            # unprotected if the entry filled near end-of-day.
+            time_in_force = TimeInForce.GTC
 
             order_data = StopOrderRequest(
                 symbol=alpaca_symbol,
@@ -645,12 +661,13 @@ class AlpacaUtils:
         """
         try:
             client = get_alpaca_trading_client()
-            is_crypto = "/" in symbol.upper()
 
             # Normalize symbol for Alpaca
             alpaca_symbol = symbol.upper().replace("/", "")
 
-            time_in_force = TimeInForce.GTC if is_crypto else TimeInForce.DAY
+            # GTC: take-profit limit sell must remain active overnight after an intraday
+            # entry fill. With DAY, this order would expire at session close.
+            time_in_force = TimeInForce.GTC
 
             order_data = LimitOrderRequest(
                 symbol=alpaca_symbol,
@@ -691,12 +708,14 @@ class AlpacaUtils:
         """
         try:
             client = get_alpaca_trading_client()
-            is_crypto = "/" in symbol.upper()
 
             # Normalize symbol for Alpaca
             alpaca_symbol = symbol.upper().replace("/", "")
 
-            time_in_force = TimeInForce.GTC if is_crypto else TimeInForce.DAY
+            # GTC: stop loss on a short position must remain active overnight. With DAY,
+            # the protective buy-stop would expire at session close, leaving the short
+            # position naked against a gap-up move.
+            time_in_force = TimeInForce.GTC
 
             order_data = StopOrderRequest(
                 symbol=alpaca_symbol,
@@ -737,12 +756,13 @@ class AlpacaUtils:
         """
         try:
             client = get_alpaca_trading_client()
-            is_crypto = "/" in symbol.upper()
 
             # Normalize symbol for Alpaca
             alpaca_symbol = symbol.upper().replace("/", "")
 
-            time_in_force = TimeInForce.GTC if is_crypto else TimeInForce.DAY
+            # GTC: take-profit buy (short cover) must remain active overnight after an
+            # intraday short entry fill. With DAY, this order would expire at session close.
+            time_in_force = TimeInForce.GTC
 
             order_data = LimitOrderRequest(
                 symbol=alpaca_symbol,
@@ -787,12 +807,15 @@ class AlpacaUtils:
         """
         try:
             client = get_alpaca_trading_client()
-            is_crypto = "/" in symbol.upper()
 
             # Normalize symbol for Alpaca
             alpaca_symbol = symbol.upper().replace("/", "")
 
-            time_in_force = TimeInForce.GTC if is_crypto else TimeInForce.DAY
+            # GTC for both equity and crypto: bracket legs (stop-loss and take-profit)
+            # inherit time_in_force from the parent MarketOrderRequest. Using GTC ensures
+            # legs remain active overnight after an intraday fill, protecting the position.
+            # With DAY, legs would expire at the session close, leaving the position naked.
+            time_in_force = TimeInForce.GTC
 
             # Build bracket order request
             order_data = MarketOrderRequest(
@@ -802,6 +825,16 @@ class AlpacaUtils:
                 side=OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL,
                 time_in_force=time_in_force,
                 order_class=OrderClass.BRACKET,
+                # NOTE on time_in_force for bracket legs:
+                # - The Alpaca REST API only accepts time_in_force on the top-level order
+                #   object. The stop_loss and take_profit sub-objects have no time_in_force
+                #   field in either the REST schema or the SDK models.
+                # - StopLossRequest only accepts `stop_price` and optional `limit_price`.
+                # - TakeProfitRequest only accepts `limit_price`.
+                # - Both bracket legs automatically inherit time_in_force from the parent
+                #   MarketOrderRequest. Because the parent uses TimeInForce.GTC (see above),
+                #   the stop-loss and take-profit legs will remain active overnight after an
+                #   intraday fill — they are NOT cancelled at the end of the trading day.
                 stop_loss=StopLossRequest(stop_price=stop_loss) if stop_loss else None,
                 take_profit=TakeProfitRequest(limit_price=take_profit) if take_profit else None
             )
@@ -815,13 +848,74 @@ class AlpacaUtils:
                 "qty": qty or "notional",
                 "stop_loss": stop_loss,
                 "take_profit": take_profit,
-                "message": f"Bracket order placed with stop ${stop_loss:.2f if stop_loss else 'N/A'}, target ${take_profit:.2f if take_profit else 'N/A'}"
+                "message": f"Bracket order placed with stop ${f'{stop_loss:.2f}' if stop_loss else 'N/A'}, target ${f'{take_profit:.2f}' if take_profit else 'N/A'}"
             }
         except Exception as e:
             return {
                 "success": False,
                 "error": str(e)
             }
+
+    @staticmethod
+    def cancel_open_orders_for_symbol(symbol: str) -> dict:
+        """
+        Cancel all open orders for a given symbol.
+        Call this before closing or reversing a position to clean up
+        any orphaned bracket legs (stop-loss / take-profit orders).
+
+        Args:
+            symbol: Stock or crypto symbol (e.g. "AAPL", "BTC/USD")
+
+        Returns:
+            dict with keys:
+                success (bool): True if all cancellations succeeded (or there was nothing to cancel)
+                cancelled (int): Number of orders cancelled
+                failed (int): Number of cancellation failures
+                errors (list[str]): Error messages for any failures
+        """
+        try:
+            client = get_alpaca_trading_client()
+
+            # Normalize symbol for Alpaca (crypto uses "/" but Alpaca API uses "")
+            alpaca_symbol = symbol.replace("/", "")
+
+            # Fetch all open orders for this symbol
+            req = GetOrdersRequest(status="open", symbols=[alpaca_symbol], limit=50)
+            open_orders = list(client.get_orders(req))
+
+            if not open_orders:
+                print(f"[CANCEL ORDERS] No open orders found for {symbol}")
+                return {"success": True, "cancelled": 0, "failed": 0, "errors": []}
+
+            print(f"[CANCEL ORDERS] Found {len(open_orders)} open order(s) for {symbol} — cancelling...")
+
+            cancelled = 0
+            failed = 0
+            errors = []
+
+            for order in open_orders:
+                try:
+                    client.cancel_order_by_id(order.id)
+                    cancelled += 1
+                    print(f"[CANCEL ORDERS] ✅ Cancelled order {order.id} ({order.side} {order.qty} {order.symbol} @ {order.type})")
+                except Exception as e:
+                    failed += 1
+                    err = f"Failed to cancel order {order.id}: {e}"
+                    errors.append(err)
+                    print(f"[CANCEL ORDERS] ❌ {err}")
+
+            print(f"[CANCEL ORDERS] Done — {cancelled} cancelled, {failed} failed")
+            return {
+                "success": failed == 0,
+                "cancelled": cancelled,
+                "failed": failed,
+                "errors": errors
+            }
+
+        except Exception as e:
+            error_msg = f"Error fetching/cancelling open orders for {symbol}: {e}"
+            print(f"[CANCEL ORDERS] ❌ {error_msg}")
+            return {"success": False, "cancelled": 0, "failed": 0, "errors": [error_msg]}
 
     @staticmethod
     def execute_trading_action(symbol: str, current_position: str, signal: str,
@@ -880,10 +974,18 @@ class AlpacaUtils:
                         results.append({"action": "hold", "message": f"Keeping LONG position in {symbol}"})
                     elif signal == "NEUTRAL":
                         # Close LONG position
+                        # Cancel any open orders (stop-loss / take-profit legs) before closing
+                        cancel_result = AlpacaUtils.cancel_open_orders_for_symbol(symbol)
+                        if not cancel_result["success"] or cancel_result["failed"] > 0:
+                            print(f"[EXECUTE] ⚠️  Some orders could not be cancelled for {symbol}: {cancel_result['errors']}")
                         close_result = AlpacaUtils.close_position(symbol)
                         results.append({"action": "close_long", "result": close_result})
                     elif signal == "SHORT":
                         # Close LONG and open SHORT
+                        # Cancel any open orders (stop-loss / take-profit legs) before closing
+                        cancel_result = AlpacaUtils.cancel_open_orders_for_symbol(symbol)
+                        if not cancel_result["success"] or cancel_result["failed"] > 0:
+                            print(f"[EXECUTE] ⚠️  Some orders could not be cancelled for {symbol}: {cancel_result['errors']}")
                         close_result = AlpacaUtils.close_position(symbol)
                         results.append({"action": "close_long", "result": close_result})
                         if close_result.get("success"):
@@ -941,10 +1043,18 @@ class AlpacaUtils:
                         results.append({"action": "hold", "message": f"Keeping SHORT position in {symbol}"})
                     elif signal == "NEUTRAL":
                         # Close SHORT position
+                        # Cancel any open orders (stop-loss / take-profit legs) before closing
+                        cancel_result = AlpacaUtils.cancel_open_orders_for_symbol(symbol)
+                        if not cancel_result["success"] or cancel_result["failed"] > 0:
+                            print(f"[EXECUTE] ⚠️  Some orders could not be cancelled for {symbol}: {cancel_result['errors']}")
                         close_result = AlpacaUtils.close_position(symbol)
                         results.append({"action": "close_short", "result": close_result})
                     elif signal == "LONG":
                         # Close SHORT and open LONG
+                        # Cancel any open orders (stop-loss / take-profit legs) before closing
+                        cancel_result = AlpacaUtils.cancel_open_orders_for_symbol(symbol)
+                        if not cancel_result["success"] or cancel_result["failed"] > 0:
+                            print(f"[EXECUTE] ⚠️  Some orders could not be cancelled for {symbol}: {cancel_result['errors']}")
                         close_result = AlpacaUtils.close_position(symbol)
                         results.append({"action": "close_short", "result": close_result})
                         if close_result.get("success"):
@@ -1208,6 +1318,10 @@ class AlpacaUtils:
                 elif signal == "SELL":
                     if has_position:
                         # Sell position
+                        # Cancel any open orders (stop-loss / take-profit legs) before closing
+                        cancel_result = AlpacaUtils.cancel_open_orders_for_symbol(symbol)
+                        if not cancel_result["success"] or cancel_result["failed"] > 0:
+                            print(f"[EXECUTE] ⚠️  Some orders could not be cancelled for {symbol}: {cancel_result['errors']}")
                         sell_result = AlpacaUtils.close_position(symbol)
                         results.append({"action": "sell", "result": sell_result})
                     else:

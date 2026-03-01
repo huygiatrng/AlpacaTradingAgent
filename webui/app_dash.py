@@ -19,6 +19,7 @@ import logging
 from webui.config.constants import APP_CONFIG, COLORS
 from webui.layout import create_main_layout
 from webui.callbacks import register_all_callbacks
+from webui.watchdog import start_watchdog
 
 
 def apply_sequential_mode_fix():
@@ -124,7 +125,10 @@ def run_app(port=7860, share=False, server_name="127.0.0.1", debug=False, max_th
     logging.getLogger("werkzeug").setLevel(logging.WARNING)
     # Optionally also silence Dash's callback exceptions logger
     logging.getLogger("dash.callback").setLevel(logging.ERROR)
-    
+
+    # Start background watchdog to detect stuck analyses
+    start_watchdog()
+
     # Run the app
     app.run(
         port=port,
