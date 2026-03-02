@@ -921,7 +921,8 @@ class AlpacaUtils:
     def execute_trading_action(symbol: str, current_position: str, signal: str,
                              dollar_amount: float, allow_shorts: bool = False,
                              stop_loss: float = None, take_profit: list = None,
-                             use_bracket_orders: bool = False) -> dict:
+                             use_bracket_orders: bool = False,
+                             entry_price: float = None) -> dict:
         """
         Execute trading action based on current position and signal
 
@@ -951,18 +952,26 @@ class AlpacaUtils:
             results = []
             
             # Helper to calculate integer quantity for any orders (used by both trading modes)
-            def _calc_qty(sym: str, amount: float) -> int:
+            def _calc_qty(sym: str, amount: float, fallback_price: float = None) -> int:
                 """Return integer share qty based on latest quote price."""
                 try:
                     quote = AlpacaUtils.get_latest_quote(sym)
                     price = quote.get("bid_price") or quote.get("ask_price")
                     if not price or price <= 0:
+                        if fallback_price and fallback_price > 0:
+                            print(f"[EXECUTE] ⚠️ Quote returned invalid price for {sym}, using fallback price ${fallback_price:.2f} for qty calc")
+                            qty = int(amount / fallback_price)
+                            return max(qty, 1)
                         # Fallback: assume $1 to avoid div-by-zero; will raise later if Alpaca rejects
                         price = 1
                     qty = int(amount / price)
                     return max(qty, 1)
                 except Exception:
-                    # Fallback: at least 1 share
+                    if fallback_price and fallback_price > 0:
+                        print(f"[EXECUTE] ⚠️ Quote fetch failed for {sym}, using fallback price ${fallback_price:.2f} for qty calc")
+                        qty = int(amount / fallback_price)
+                        return max(qty, 1)
+                    # last resort only
                     return 1
             
             if allow_shorts:
@@ -996,7 +1005,7 @@ class AlpacaUtils:
                                 results.append({"action": "open_short", "result": {"success": False, "error": error_msg}})
                             else:
                                 # Calculate integer quantity for short (fractional shares cannot be shorted)
-                                qty_int = _calc_qty(symbol, dollar_amount)
+                                qty_int = _calc_qty(symbol, dollar_amount, entry_price)
                                 if use_bracket_orders:
                                     bracket_result = AlpacaUtils.place_bracket_order(
                                         symbol=symbol, side="sell", qty=qty_int,
@@ -1069,7 +1078,7 @@ class AlpacaUtils:
                                         stop_loss=bracket_sl, take_profit=bracket_tp
                                     )
                                 else:
-                                    qty_int = _calc_qty(symbol, dollar_amount)
+                                    qty_int = _calc_qty(symbol, dollar_amount, entry_price)
                                     bracket_result = AlpacaUtils.place_bracket_order(
                                         symbol=symbol, side="buy", qty=qty_int,
                                         stop_loss=bracket_sl, take_profit=bracket_tp
@@ -1081,7 +1090,7 @@ class AlpacaUtils:
                                     long_result = AlpacaUtils.place_market_order(symbol, "buy", notional=dollar_amount)
                                 else:
                                     # For stocks, calculate quantity
-                                    qty_int = _calc_qty(symbol, dollar_amount)
+                                    qty_int = _calc_qty(symbol, dollar_amount, entry_price)
                                     long_result = AlpacaUtils.place_market_order(symbol, "buy", qty=qty_int)
                                 results.append({"action": "open_long", "result": long_result})
 
@@ -1128,7 +1137,7 @@ class AlpacaUtils:
                                     stop_loss=bracket_sl, take_profit=bracket_tp
                                 )
                             else:
-                                qty_int = _calc_qty(symbol, dollar_amount)
+                                qty_int = _calc_qty(symbol, dollar_amount, entry_price)
                                 bracket_result = AlpacaUtils.place_bracket_order(
                                     symbol=symbol, side="buy", qty=qty_int,
                                     stop_loss=bracket_sl, take_profit=bracket_tp
@@ -1140,7 +1149,7 @@ class AlpacaUtils:
                                 long_result = AlpacaUtils.place_market_order(symbol, "buy", notional=dollar_amount)
                             else:
                                 # For stocks, calculate quantity
-                                qty_int = _calc_qty(symbol, dollar_amount)
+                                qty_int = _calc_qty(symbol, dollar_amount, entry_price)
                                 long_result = AlpacaUtils.place_market_order(symbol, "buy", qty=qty_int)
                             results.append({"action": "open_long", "result": long_result})
 
@@ -1181,7 +1190,7 @@ class AlpacaUtils:
                             results.append({"action": "open_short", "result": {"success": False, "error": error_msg}})
                         else:
                             # For stocks, attempt short selling
-                            qty_int = _calc_qty(symbol, dollar_amount)
+                            qty_int = _calc_qty(symbol, dollar_amount, entry_price)
                             if use_bracket_orders:
                                 bracket_result = AlpacaUtils.place_bracket_order(
                                     symbol=symbol, side="sell", qty=qty_int,
@@ -1245,7 +1254,7 @@ class AlpacaUtils:
                                     stop_loss=bracket_sl, take_profit=bracket_tp
                                 )
                             else:
-                                qty_int = _calc_qty(symbol, dollar_amount)
+                                qty_int = _calc_qty(symbol, dollar_amount, entry_price)
                                 bracket_result = AlpacaUtils.place_bracket_order(
                                     symbol=symbol, side="buy", qty=qty_int,
                                     stop_loss=bracket_sl, take_profit=bracket_tp
@@ -1257,7 +1266,7 @@ class AlpacaUtils:
                                 buy_result = AlpacaUtils.place_market_order(symbol, "buy", notional=dollar_amount)
                             else:
                                 # For stocks, calculate quantity
-                                qty_int = _calc_qty(symbol, dollar_amount)
+                                qty_int = _calc_qty(symbol, dollar_amount, entry_price)
                                 buy_result = AlpacaUtils.place_market_order(symbol, "buy", qty=qty_int)
                             results.append({"action": "buy", "result": buy_result})
 

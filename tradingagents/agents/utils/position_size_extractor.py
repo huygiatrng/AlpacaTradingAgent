@@ -47,13 +47,24 @@ def extract_position_size(text: str, account_info: dict) -> dict:
         return result
 
     # Pattern 1: Explicit dollar amounts with "RECOMMENDED POSITION SIZE" or similar
-    # Match: "RECOMMENDED POSITION SIZE: $2,500" or "Position Size: $1000"
-    pattern_explicit_dollar = r"(?:RECOMMENDED POSITION SIZE|APPROVED POSITION SIZE|Position Size|Trade Size):\s*\$?([\d,]+(?:\.\d{2})?)\s*(?:USD|dollars?)?"
+    # Match: "RECOMMENDED POSITION SIZE: $2,500" or "Position Size: $1000" or "Notional: $30,877"
+    pattern_explicit_dollar = r"(?:RECOMMENDED POSITION SIZE|APPROVED POSITION SIZE|APPROVED NOTIONAL|Position Size|Trade Size|Notional)\s*[:\s≈=]\s*\$?([\d,]+(?:\.\d{2})?)"
     match = re.search(pattern_explicit_dollar, text, re.IGNORECASE)
     if match:
         amount_str = match.group(1).replace(',', '')
         result["recommended_size_dollars"] = float(amount_str)
         result["extraction_method"] = "explicit_dollar"
+        result["confidence"] = "high"
+        result["original_text"] = match.group(0)
+        return result
+
+    # Pattern 1b: Arithmetic form "77 x $401 = $30,877" or "~77 shares @ $401 = $30,877"
+    pattern_shares_x_price = r"(?:\~?\d+)\s*(?:shares?)?\s*[×xX@]\s*\$[\d,.]+\s*[=≈]\s*\$?([\d,]+(?:\.\d{2})?)"
+    match = re.search(pattern_shares_x_price, text, re.IGNORECASE)
+    if match:
+        amount_str = match.group(1).replace(',', '')
+        result["recommended_size_dollars"] = float(amount_str)
+        result["extraction_method"] = "shares_x_price_notional"
         result["confidence"] = "high"
         result["original_text"] = match.group(0)
         return result
@@ -113,15 +124,22 @@ def extract_position_size(text: str, account_info: dict) -> dict:
     pattern_generic_dollar = r"\$([\d,]+(?:\.\d{2})?)"
     matches = re.findall(pattern_generic_dollar, text)
     if matches:
-        # Take the first substantial amount (> $100)
+        amounts = []
         for amount_str in matches:
-            amount = float(amount_str.replace(',', ''))
-            if amount >= 100:
-                result["recommended_size_dollars"] = amount
-                result["extraction_method"] = "generic_dollar"
-                result["confidence"] = "low"
-                result["original_text"] = f"${amount_str}"
-                return result
+            try:
+                amount = float(amount_str.replace(',', ''))
+                if 100 <= amount <= 1_000_000:
+                    amounts.append(amount)
+            except ValueError:
+                continue
+        if amounts:
+            best = max(amounts)
+            result["recommended_size_dollars"] = best
+            result["extraction_method"] = "generic_dollar"
+            result["confidence"] = "low"
+            result["original_text"] = f"${best:,.2f}"
+            print(f"[POSITION SIZE EXTRACTOR] WARNING: generic dollar fallback used, picked ${max(amounts):,.2f} — check pattern coverage")
+            return result
 
     # No pattern matched - extraction failed
     result["fallback_used"] = True
@@ -214,3 +232,22 @@ def convert_percentage_to_dollars(percentage: float, account_info: dict) -> floa
     """
     buying_power = account_info.get("buying_power", 0)
     return (percentage / 100) * buying_power
+
+
+if __name__ == '__main__':
+    sample_text = """
+    Entry Price: $401.00
+    Stop Loss: $414.00
+    Account Equity: $100,316.72
+    Max risk allowed (3%): $3,009.50
+    Risk budget (1.0%): $1,003.17
+    Shares = $1,003.17 / $13.00 approx 77 shares
+    Notional approx 77 x $401 = $30,877
+    APPROVED POSITION SIZE: $30,877 (77 shares short)
+    """
+    account = {"equity": 100316.72, "buying_power": 100316.72, "cash": 100316.72}
+    result = extract_position_size(sample_text, account)
+    print(f"Result: {result}")
+    assert result["recommended_size_dollars"] == 30877.0, f"Expected 30877.0, got {result['recommended_size_dollars']}"
+    assert result["confidence"] == "high", f"Expected high confidence, got {result['confidence']}"
+    print("TEST PASSED")

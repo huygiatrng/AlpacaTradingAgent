@@ -176,7 +176,8 @@ def execute_trade_after_analysis(ticker, allow_shorts, trade_amount, use_ai_sizi
             allow_shorts=allow_shorts,
             stop_loss=final_stop_loss,
             take_profit=final_take_profit,
-            use_bracket_orders=use_bracket_orders
+            use_bracket_orders=use_bracket_orders,
+            entry_price=approved_prices.get("entry_price") if approved_prices else None
         )
         
         # Check individual action results and provide detailed feedback
