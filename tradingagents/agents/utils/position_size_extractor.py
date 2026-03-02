@@ -69,6 +69,17 @@ def extract_position_size(text: str, account_info: dict) -> dict:
         result["original_text"] = match.group(0)
         return result
 
+    # Pattern 1c: Risk budget division result "risk $X / $Y per share = Z shares"
+    pattern_risk_division = r"\$[\d,.]+\s*/\s*\$[\d,.]+(?:\s*per\s*share)?\s*[=≈]\s*([\d,]+)\s*shares?"
+    match = re.search(pattern_risk_division, text, re.IGNORECASE)
+    if match:
+        shares = int(match.group(1).replace(',', ''))
+        result["recommended_shares"] = shares
+        result["extraction_method"] = "risk_division_shares"
+        result["confidence"] = "high"
+        result["original_text"] = match.group(0)
+        return result
+
     # Pattern 2: Percentage of account/buying power
     # Match: "3% of buying power" or "risk 2.5% of account"
     pattern_percentage = r"(?:risk|allocate|use)\s*([\d.]+)%\s*(?:of\s*)?(?:account|buying power|equity|portfolio)"
@@ -85,7 +96,7 @@ def extract_position_size(text: str, account_info: dict) -> dict:
 
     # Pattern 3: Dollar amounts with context (anywhere in text)
     # Match: "allocate $2,500" or "risk $1000" or "buy $1.5k worth"
-    pattern_contextual_dollar = r"(?:allocate|risk|buy|invest|trade)\s*\$([\d,]+(?:\.\d{2})?)\s*(?:k|K)?\s*(?:USD|dollars?|worth)?(?!\s*shares?)"
+    pattern_contextual_dollar = r"(?:allocate|buy|invest|trade)\s*\$([\d,]+(?:\.\d{2})?)\s*(?:k|K)?\s*(?:USD|dollars?|worth)?(?!\s*shares?)"
     match = re.search(pattern_contextual_dollar, text, re.IGNORECASE)
     if match:
         amount_str = match.group(1).replace(',', '').strip()
