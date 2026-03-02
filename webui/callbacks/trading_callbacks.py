@@ -79,9 +79,19 @@ def register_trading_callbacks(app):
             # Import AlpacaUtils for liquidation
             from tradingagents.dataflows.alpaca_utils import AlpacaUtils
             
+            # Cancel any open bracket orders (stop-loss / take-profit legs) before closing.
+            # Alpaca returns 403 "held_for_orders" if open orders still hold the shares.
+            cancel_result = AlpacaUtils.cancel_open_orders_for_symbol(symbol)
+            if not cancel_result.get("success") or cancel_result.get("failed", 0) > 0:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Some orders could not be cancelled for %s before liquidation: %s",
+                    symbol, cancel_result.get("errors", [])
+                )
+
             # Execute liquidation
             result = AlpacaUtils.close_position(symbol)
-            
+
             if result.get("success"):
                 return dbc.Alert([
                     html.I(className="fas fa-check-circle me-2"),
