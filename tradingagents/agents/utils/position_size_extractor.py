@@ -130,27 +130,11 @@ def extract_position_size(text: str, account_info: dict) -> dict:
         # Note: dollar amount will be calculated later based on current price
         return result
 
-    # Pattern 5: Generic dollar amounts (last resort)
-    # Match any standalone dollar amount: "$2,500"
-    pattern_generic_dollar = r"\$([\d,]+(?:\.\d{2})?)"
-    matches = re.findall(pattern_generic_dollar, text)
-    if matches:
-        amounts = []
-        for amount_str in matches:
-            try:
-                amount = float(amount_str.replace(',', ''))
-                if 100 <= amount <= 1_000_000:
-                    amounts.append(amount)
-            except ValueError:
-                continue
-        if amounts:
-            best = max(amounts)
-            result["recommended_size_dollars"] = best
-            result["extraction_method"] = "generic_dollar"
-            result["confidence"] = "low"
-            result["original_text"] = f"${best:,.2f}"
-            print(f"[POSITION SIZE EXTRACTOR] WARNING: generic dollar fallback used, picked ${max(amounts):,.2f} — check pattern coverage")
-            return result
+    # Pattern 5 (generic dollar fallback) intentionally removed.
+    # Picking the "largest dollar amount" from text is unreliable — entry prices,
+    # stop levels, and target prices all appear as dollar amounts and get misidentified
+    # as position sizes (e.g. AMD entry $200.5 → extractor returned $200 → 1 share).
+    # When no explicit position size pattern matches, fall through to configured trade_amount.
 
     # No pattern matched - extraction failed
     result["fallback_used"] = True
