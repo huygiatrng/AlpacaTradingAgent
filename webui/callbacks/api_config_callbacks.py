@@ -88,25 +88,34 @@ def register_api_config_callbacks(app):
         Input("api-keys-store", "data")
     )
     def load_api_keys(stored_keys):
-        """Load API keys from localStorage or show .env status"""
+        """Load API keys from localStorage, falling back to .env on first load"""
         import dash_bootstrap_components as dbc
         from dash import html
         
-        defaults = get_default_api_keys()
-        
-        # Check if .env file exists
+        # Load .env file
         load_dotenv()
+        
+        # Get values from .env (filter out placeholder values)
+        def get_env_value(key):
+            val = os.getenv(key, "")
+            if val and not val.startswith("your_"):
+                return val
+            return ""
+        
         env_vars = {
-            "openai": os.getenv("OPENAI_API_KEY", ""),
-            "alpaca-key": os.getenv("ALPACA_API_KEY", ""),
-            "alpaca-secret": os.getenv("ALPACA_SECRET_KEY", ""),
-            "finnhub": os.getenv("FINNHUB_API_KEY", ""),
-            "fred": os.getenv("FRED_API_KEY", ""),
-            "coindesk": os.getenv("COINDESK_API_KEY", ""),
+            "openai": get_env_value("OPENAI_API_KEY"),
+            "alpaca-key": get_env_value("ALPACA_API_KEY"),
+            "alpaca-secret": get_env_value("ALPACA_SECRET_KEY"),
+            "finnhub": get_env_value("FINNHUB_API_KEY"),
+            "fred": get_env_value("FRED_API_KEY"),
+            "coindesk": get_env_value("COINDESK_API_KEY"),
         }
         
+        alpaca_paper_str = os.getenv("ALPACA_USE_PAPER", "True")
+        env_alpaca_paper = alpaca_paper_str.lower() in ("true", "1", "yes")
+        
         # Count how many .env keys are set
-        env_keys_set = sum(1 for v in env_vars.values() if v and v != "your_" and not v.startswith("your_"))
+        env_keys_set = sum(1 for v in env_vars.values() if v)
         
         if env_keys_set > 0:
             env_status = dbc.Alert([
@@ -120,18 +129,37 @@ def register_api_config_callbacks(app):
                 "No .env file detected or no keys configured. Please enter your API keys below."
             ], color="warning", className="mb-0 py-2")
         
-        if not stored_keys:
-            # Return empty values to let users input their keys
+        # Check if localStorage has any real keys set
+        has_stored_keys = stored_keys and any(
+            stored_keys.get(key) for key in ["openai", "alpaca-key", "alpaca-secret", "finnhub", "fred", "coindesk"]
+        )
+        
+        if not has_stored_keys:
+            # No localStorage keys - load from .env as default and apply to runtime
+            keys_to_apply = {
+                "openai": env_vars.get("openai", ""),
+                "alpaca-key": env_vars.get("alpaca-key", ""),
+                "alpaca-secret": env_vars.get("alpaca-secret", ""),
+                "finnhub": env_vars.get("finnhub", ""),
+                "fred": env_vars.get("fred", ""),
+                "coindesk": env_vars.get("coindesk", ""),
+                "alpaca-paper": env_alpaca_paper
+            }
+            apply_api_keys_to_config(keys_to_apply)
+            
             return (
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                True,
+                env_vars.get("openai", ""),
+                env_vars.get("alpaca-key", ""),
+                env_vars.get("alpaca-secret", ""),
+                env_vars.get("finnhub", ""),
+                env_vars.get("fred", ""),
+                env_vars.get("coindesk", ""),
+                env_alpaca_paper,
                 env_status
             )
+        
+        # localStorage has keys - use those and apply to runtime
+        apply_api_keys_to_config(stored_keys)
         
         return (
             stored_keys.get("openai", ""),
