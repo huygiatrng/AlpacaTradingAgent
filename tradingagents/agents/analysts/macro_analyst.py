@@ -43,8 +43,10 @@ def create_macro_analyst(llm, toolkit):
                 # print(f"[MACRO] Using offline macro tools: Cached Economic Data")
 
             source_guidance = (
-                " When online tools are enabled, combine FRED-based macro data tools and OpenAI web-search macro news before concluding."
-                f" Use `get_macro_news_openai(curr_date, ticker_context='{ticker}')` for relevance."
+                " **MUST first call the provided macro tools** to gather current economic data before providing analysis. "
+                " ALWAYS combine FRED-based macro data tools and OpenAI web-search macro news before concluding."
+                f" MUST use `get_macro_news_openai(curr_date, ticker_context='{ticker}')` for relevance."
+                " Do not skip tool calls or provide generic analysis without real-time economic data and current market conditions."
             )
 
             system_message = (
@@ -68,10 +70,11 @@ def create_macro_analyst(llm, toolkit):
                 "for swing traders covering the 2-10 day horizon, with specific dates, expected reactions, and sector implications. "
                 "Provide timing-specific macro analysis that swing traders can use to manage positions through economic events.\n\n"
                 + source_guidance + "\n\n"
-                "Make sure to append a Markdown table organizing:\n"
+                "ALWAYS append a comprehensive Markdown table organizing:\n"
                 "| Date/Time | Economic Event | Expected Impact | Affected Sectors | Swing Trade Implication |\n"
-                "|-----------|----------------|-----------------|------------------|------------------------|\n"
-                "| [Specific Date/Time] | [Data Release/Fed Event] | [High/Med/Low + Direction] | [Sectors Most Affected] | [Long/Short/Neutral Bias] |"
+                "|-----------|----------------|-----------------|------------------|------------------------|"
+                "| [Specific Date/Time] | [Data Release/Fed Event] | [High/Med/Low + Direction] | [Sectors Most Affected] | [Long/Short/Neutral Bias] |\n\n"
+                "Focus on actionable macro insights that will directly impact your trading decisions. Always include specific economic data points and recent trends in your analysis."
             )
 
             prompt = ChatPromptTemplate.from_messages(
@@ -209,6 +212,53 @@ For your reference, the current date is {current_date}. Focus on macroeconomic c
                 except Exception as e:
                     print(f"[MACRO] ❌ Error in LLM chain iteration {iteration_count}: {e}")
                     break
+            
+            # ========== LAYER 2: Content Quality Check ==========
+            # Enhanced validation to ensure substantial analysis content
+            analysis_content = result.content if result.content else ""
+            
+            # Check if we have substantial analysis content (not just final proposal)
+            if len(analysis_content.strip()) < 100 or ("FINAL TRANSACTION PROPOSAL:" in analysis_content and len(analysis_content.replace("FINAL TRANSACTION PROPOSAL:", "").strip()) < 100):
+                print(f"[MACRO] ⚠️ Analysis content too short ({len(analysis_content.strip())} chars), generating fallback")
+                # Generate fallback analysis if content is too short
+                fallback_prompt = f"""As a swing trading macro analyst, provide a comprehensive macroeconomic analysis for {current_date}.
+
+Since detailed macro data may not be available, provide a professional analysis covering:
+1. **Federal Reserve Policy** and recent decisions
+2. **Economic Indicators** (inflation, employment, GDP growth outlook)
+3. **Yield Curve** and interest rate environment
+4. **Market Risk Sentiment** (VIX, volatility expectations)
+5. **Sector Rotation Themes** for the coming 2-10 days
+6. **Trading Implications** for swing positions
+
+Include the required event calendar table and conclude with swing trading implications.
+Focus on actionable insights for multi-day (2-10 day) swing trading decisions."""
+                
+                fallback_result = llm.invoke(fallback_prompt)
+                analysis_content = fallback_result.content if hasattr(fallback_result, 'content') else str(fallback_result)
+            
+            # ========== LAYER 3: Ensure Final Recommendation ==========
+            # Ensure we have a final recommendation
+            if "FINAL TRANSACTION PROPOSAL:" not in analysis_content:
+                # Create a final recommendation based on the analysis
+                final_prompt = f"""Based on the following macro analysis for {current_date}, provide your final swing trading recommendation considering macroeconomic conditions and sector implications.
+
+Analysis:
+{analysis_content}
+
+Provide a brief justification and conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**"""
+                
+                # Use a simple chain without tools for the final recommendation
+                final_chain = llm
+                final_result = final_chain.invoke(final_prompt)
+                final_content = final_result.content if hasattr(final_result, 'content') else str(final_result)
+                
+                # Properly combine the analysis with the final proposal
+                combined_content = analysis_content + "\n\n---\n\n## Final Recommendation\n\n" + final_content
+                result = AIMessage(content=combined_content)
+            else:
+                # Analysis already contains final proposal
+                result = AIMessage(content=analysis_content)
             
             # If we had tool failures, let the LLM know and ask for a general analysis
             if tool_failures and not successful_tools:

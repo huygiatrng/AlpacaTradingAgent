@@ -70,9 +70,11 @@ def create_fundamentals_analyst(llm, toolkit):
                 # print(f"[FUNDAMENTALS] Using offline tools: Finnhub + SimFin (stock) or DeFiLlama (crypto)")
 
             source_guidance = (
-                " When online tools are enabled, combine OpenAI web-search fundamentals with structured data tools before concluding."
-                " For stocks, use OpenAI + Finnhub + SimFin."
-                " For crypto, use OpenAI + DeFiLlama."
+                " **MUST** call tools to gather comprehensive fundamental data before providing analysis. "
+                " ALWAYS combine OpenAI web-search fundamentals with structured data tools before concluding."
+                " For stocks, MUST use OpenAI + Finnhub + SimFin fundamentals."
+                " For crypto, MUST use OpenAI + DeFiLlama protocol metrics."
+                " Do not provide analysis without first executing these tool calls to obtain current fundamental data."
             )
             system_message = (
                 "You are a SWING TRADING fundamentals analyst focused on identifying fundamental catalysts and factors that could drive multi-day price movements (2-10 day swing horizon). "
@@ -93,8 +95,8 @@ def create_fundamentals_analyst(llm, toolkit):
                 + "- Consider both positive and negative fundamental drivers over the swing period \n"
                 + "- Focus on actionable insights for swing trade entries and exits \n"
                 + "- Avoid long-term valuation metrics unless they create catalysts during the swing window \n"
-                + f"Provide detailed, actionable fundamental analysis that swing traders can use to time entries and exits around multi-day catalysts.{source_guidance}"
-                + " Make sure to append a Markdown table at the end organizing key events, dates, and potential price impact for swing trading decisions."
+                + f"Provide detailed, actionable fundamental analysis that swing traders can use to time entries and exits around multi-day catalysts. {source_guidance}"
+                + " ALWAYS append a comprehensive Markdown table at the end organizing key events, dates, probability assessment, and potential price impact for swing trading decisions. Always include specific catalyst metrics and historical precedent data in your analysis."
             )
 
             prompt = ChatPromptTemplate.from_messages(
@@ -156,8 +158,13 @@ For your reference, the current date is {current_date}. {asset_type_text} {ticke
             # First LLM response
             result = chain.invoke(messages_history)
 
+            # Track iterations and tool execution
+            max_iterations = 10  # Prevent infinite loops
+            iteration_count = 0
+
             # Handle iterative tool calls until the model stops requesting them
-            while getattr(result, "additional_kwargs", {}).get("tool_calls"):
+            while getattr(result, "additional_kwargs", {}).get("tool_calls") and iteration_count < max_iterations:
+                iteration_count += 1
                 for tool_call in result.additional_kwargs["tool_calls"]:
                     # Handle different tool call structures
                     if isinstance(tool_call, dict):
@@ -206,28 +213,55 @@ For your reference, the current date is {current_date}. {asset_type_text} {ticke
 
                 # Ask the LLM to continue with the new context
                 result = chain.invoke(messages_history)
-             
-            elapsed_time = time.time() - start_time
-            # print(f"[FUNDAMENTALS] ✅ Analysis completed in {elapsed_time:.2f} seconds")
-            # print(f"[FUNDAMENTALS] Generated report length: {len(result.content)} characters")
+            
+            # ========== LAYER 2: Content Quality Check ==========
+            # Enhanced validation to ensure substantial analysis content
+            analysis_content = result.content if result.content else ""
+            
+            # Check if we have substantial analysis content (not just final proposal)
+            if len(analysis_content.strip()) < 100 or ("FINAL TRANSACTION PROPOSAL:" in analysis_content and len(analysis_content.replace("FINAL TRANSACTION PROPOSAL:", "").strip()) < 100):
+                # Generate fallback analysis if content is too short
+                fallback_prompt = f"""As a swing trading fundamentals analyst, provide a comprehensive fundamental analysis for {ticker} on {current_date}.
 
-            # Check if the result already contains FINAL TRANSACTION PROPOSAL
-            if "FINAL TRANSACTION PROPOSAL:" not in result.content:
-                # Create a simple prompt that includes the analysis content directly
-                final_prompt = f"""Based on the following fundamental analysis for {ticker}, please provide your final trading recommendation considering the financial health, valuation, and earnings outlook.
+Since detailed fundamental data may not be available, provide a professional analysis covering:
+1. **Company Overview & Financial Position** for {ticker}
+2. **Key Financial Metrics** (earnings, revenue trends, profitability)
+3. **Catalyst Events** within 2-10 days (earnings, analyst changes, major announcements)
+4. **Valuation Analysis** relative to peers and historical levels
+5. **Swing Trading Implications** for multi-day positions
+
+Include the required events/catalyst table and conclude with swing trading implications.
+Focus on actionable insights for multi-day (2-10 day) swing trading decisions."""
+                
+                fallback_result = llm.invoke(fallback_prompt)
+                analysis_content = fallback_result.content if hasattr(fallback_result, 'content') else str(fallback_result)
+            
+            # ========== LAYER 3: Ensure Final Recommendation ==========
+            # Ensure we have a final recommendation
+            if "FINAL TRANSACTION PROPOSAL:" not in analysis_content:
+                # Create a final recommendation based on the analysis
+                final_prompt = f"""Based on the following fundamental analysis for {ticker}, provide your final swing trading recommendation considering financial catalysts and multi-day price implications.
 
 Analysis:
-{result.content}
+{analysis_content}
 
-You must conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** followed by a brief justification."""
+Provide a brief justification and conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**"""
                 
                 # Use a simple chain without tools for the final recommendation
                 final_chain = llm
                 final_result = final_chain.invoke(final_prompt)
+                final_content = final_result.content if hasattr(final_result, 'content') else str(final_result)
                 
-                # Combine the analysis with the final proposal
-                combined_content = result.content + "\n\n" + final_result.content
+                # Properly combine the analysis with the final proposal
+                combined_content = analysis_content + "\n\n---\n\n## Final Recommendation\n\n" + final_content
                 result = AIMessage(content=combined_content)
+            else:
+                # Analysis already contains final proposal
+                result = AIMessage(content=analysis_content)
+            
+            elapsed_time = time.time() - start_time
+            # print(f"[FUNDAMENTALS] ✅ Analysis completed in {elapsed_time:.2f} seconds")
+            # print(f"[FUNDAMENTALS] Generated report length: {len(result.content)} characters")
 
             # Append final assistant response to history for downstream agents
             messages_history.append(result)

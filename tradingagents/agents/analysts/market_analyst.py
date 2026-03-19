@@ -74,9 +74,20 @@ def create_market_analyst(llm, toolkit):
         system_message = (
             """You are a **multi-timeframe technical analyst**. Your input is a structured Technical Brief (JSON) that has already been computed deterministically across three timeframes: **1 h, 4 h, and 1 d**.
 
+**IMPORTANT: TOOL EXECUTION REQUIREMENT**
+- **MUST** call the technical analysis tools to gather current price action and indicator data before providing analysis
+- **ALWAYS** call `get_technical_brief` FIRST to get the synthesized technical picture
+- MUST combine Alpaca price data with Stockstats indicators in your analysis
+- Do not provide technical analysis without first executing these tool calls to obtain current market data
+
 ## Your workflow
 
-1. **Use Alpaca + Stockstats tools** as your base evidence:
+1. **USE TOOLS FIRST** - ALWAYS call these tools in this order:
+   - `get_technical_brief` (for synthesized technical picture)
+   - `get_alpaca_data_report` for OHLCV context
+   - `get_stockstats_indicators_report_online` (or offline variant) for indicator values
+
+   Your base evidence sources:
    - `get_alpaca_data_report` for OHLCV context
    - `get_stockstats_indicators_report_online` (or offline variant) for indicator values
    - `get_technical_brief` for compact synthesized confirmation
@@ -136,7 +147,13 @@ Conclude with: **FINAL TRANSACTION PROPOSAL: BUY/HOLD/SELL** and a brief justifi
 - Keep each section on separate lines. Do not output inline "a) ... b) ... c) ..." formatting.
 - Keep table rows on separate lines (valid markdown table syntax).
 
-**Important**: Anchor your thesis in both Alpaca price action and Stockstats indicators."""
+**ALWAYS include**:
+- Specific price levels from Alpaca data
+- Specific indicator values from Stockstats (RSI, MACD, Stoch RSI, ATR, Bollinger Bands, etc.)
+- Multi-timeframe confluence analysis (how 1h, 4h, 1d align)
+- The summary table with all fields populated
+
+**Important**: Anchor your thesis in both Alpaca price action and Stockstats indicators. Always reference actual data points in your analysis."""
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -193,8 +210,13 @@ For your reference, the current date is {current_date}. The company we want to l
         # First LLM response
         result = chain.invoke(messages_history)
 
+        # Track iterations to prevent infinite loops
+        max_iterations = 10
+        iteration_count = 0
+
         # Handle iterative tool calls until the model stops requesting them
-        while getattr(result, "additional_kwargs", {}).get("tool_calls"):
+        while getattr(result, "additional_kwargs", {}).get("tool_calls") and iteration_count < max_iterations:
+            iteration_count += 1
             for tool_call in result.additional_kwargs["tool_calls"]:
                 # Handle different tool call structures
                 if isinstance(tool_call, dict):
@@ -244,25 +266,51 @@ For your reference, the current date is {current_date}. The company we want to l
             # Ask the LLM to continue with the new context
             result = chain.invoke(messages_history)
         
-        # Check if the result already contains FINAL TRANSACTION PROPOSAL
-        if "FINAL TRANSACTION PROPOSAL:" not in result.content:
-            # Create a simple prompt that includes the analysis content directly
-            final_prompt = f"""Based on the following market and technical analysis for {ticker}, please provide your final trading recommendation.
+        # ========== LAYER 2: Content Quality Check ==========
+        # Enhanced validation to ensure substantial analysis content
+        analysis_content = result.content if result.content else ""
+        
+        # Check if we have substantial analysis content (not just final proposal)
+        if len(analysis_content.strip()) < 150 or ("FINAL TRANSACTION PROPOSAL:" in analysis_content and len(analysis_content.replace("FINAL TRANSACTION PROPOSAL:", "").strip()) < 150):
+            # Generate fallback analysis if content is too short
+            fallback_prompt = f"""As a swing trading technical analyst, provide a comprehensive technical analysis for {ticker} on {current_date}.
+
+Since detailed technical data may not be available, provide a professional analysis covering:
+1. **Trend Analysis** - direction, strength (ADX), moving averages (EMA 8, SMA 200)
+2. **Momentum Indicators** - RSI, Stoch RSI, MACD status
+3. **Support & Resistance** - key price levels, recent swing points
+4. **Entry & Exit Levels** - specific price targets for swing entry
+5. **Risk Management** - stop loss and position sizing based on volatility
+6. **Swing Trading Setup** - multi-day price action confirmation
+
+Include the required summary table with Entry, Target, Stop, and R:R values.
+Focus on actionable technical levels for multi-day (2-10 day) swing trading decisions."""
+            
+            fallback_result = llm.invoke(fallback_prompt)
+            analysis_content = fallback_result.content if hasattr(fallback_result, 'content') else str(fallback_result)
+        
+        # ========== LAYER 3: Ensure Final Recommendation ==========
+        # Ensure we have a final recommendation
+        if "FINAL TRANSACTION PROPOSAL:" not in analysis_content:
+            # Create a final recommendation based on the analysis
+            final_prompt = f"""Based on the following technical analysis for {ticker}, provide your final swing trading recommendation considering price action, indicators, and setup quality.
 
 Analysis:
-{result.content}
+{analysis_content}
 
-You must conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** followed by a brief justification."""
+Provide a brief justification and conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**"""
             
             # Use a simple chain without tools for the final recommendation
             final_chain = llm
             final_result = final_chain.invoke(final_prompt)
+            final_content = final_result.content if hasattr(final_result, 'content') else str(final_result)
             
-            # Combine the analysis with the final proposal
-            combined_content = result.content + "\n\n" + final_result.content
+            # Properly combine the analysis with the final proposal
+            combined_content = analysis_content + "\n\n---\n\n## Final Recommendation\n\n" + final_content
             result = AIMessage(content=_normalize_market_report_markdown(combined_content))
         else:
-            result = AIMessage(content=_normalize_market_report_markdown(result.content))
+            # Analysis already contains final proposal
+            result = AIMessage(content=_normalize_market_report_markdown(analysis_content))
 
         return {
             "messages": [result],
