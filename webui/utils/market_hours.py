@@ -73,22 +73,22 @@ def validate_market_hours(hours_str: str) -> Tuple[bool, List[int], str]:
 def is_market_open(target_datetime: datetime.datetime = None) -> Tuple[bool, str]:
     """
     Check if the US stock market is open at the given datetime.
-    
+
     Args:
         target_datetime: Datetime to check (defaults to current time)
-        
+
     Returns:
         Tuple of (is_open, reason_if_closed)
     """
-    if target_datetime is None:
-        target_datetime = datetime.datetime.now()
-    
-    # Convert to Eastern Time
     eastern = pytz.timezone('US/Eastern')
-    if target_datetime.tzinfo is None:
-        # Assume local time and convert to Eastern
-        target_datetime = pytz.timezone('US/Eastern').localize(target_datetime)
+
+    if target_datetime is None:
+        # Always compute from UTC and convert to Eastern to avoid using local system timezone as ET
+        target_datetime = datetime.datetime.now(pytz.utc).astimezone(eastern)
     else:
+        if target_datetime.tzinfo is None:
+            # Treat naive datetimes as UTC by default (consistent cross-timezone behavior)
+            target_datetime = target_datetime.replace(tzinfo=pytz.utc)
         target_datetime = target_datetime.astimezone(eastern)
     
     # Check if it's a weekend
@@ -115,22 +115,22 @@ def is_market_open(target_datetime: datetime.datetime = None) -> Tuple[bool, str
 def get_next_market_datetime(target_hour: int, from_datetime: datetime.datetime = None) -> datetime.datetime:
     """
     Get the next market datetime for the specified hour.
-    
+
     Args:
         target_hour: Hour to target (e.g., 11 for 11 AM)
         from_datetime: Starting datetime (defaults to current time)
-        
+
     Returns:
         Next datetime when market will be open at the target hour
     """
-    if from_datetime is None:
-        from_datetime = datetime.datetime.now()
-        
-    # Convert to Eastern Time
     eastern = pytz.timezone('US/Eastern')
-    if from_datetime.tzinfo is None:
-        from_datetime = eastern.localize(from_datetime)
+
+    if from_datetime is None:
+        # Always compute from UTC and convert to Eastern
+        from_datetime = datetime.datetime.now(pytz.utc).astimezone(eastern)
     else:
+        if from_datetime.tzinfo is None:
+            from_datetime = from_datetime.replace(tzinfo=pytz.utc)
         from_datetime = from_datetime.astimezone(eastern)
     
     # Start with today at the target hour

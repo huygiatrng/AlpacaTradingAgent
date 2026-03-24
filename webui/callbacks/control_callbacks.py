@@ -553,15 +553,20 @@ def register_control_callbacks(app):
                 
                 # Market hour scheduling loop
                 import datetime
+                import pytz
                 from webui.utils.market_hours import get_next_market_datetime, is_market_open
+
+                eastern = pytz.timezone('US/Eastern')
+                utc = pytz.utc
                 
                 while not app_state.stop_market_hour:
-                    # Find next execution time
-                    now = datetime.datetime.now()
+                    # Find next execution time from current UTC/Eastern time
+                    now_utc = datetime.datetime.now(utc)
+                    now_eastern = now_utc.astimezone(eastern)
                     next_execution_times = []
                     
                     for hour in app_state.market_hours:
-                        next_dt = get_next_market_datetime(hour, now)
+                        next_dt = get_next_market_datetime(hour, now_eastern)
                         next_execution_times.append((hour, next_dt))
                     
                     # Sort by next execution time
@@ -571,7 +576,7 @@ def register_control_callbacks(app):
                     print(f"[MARKET_HOUR] Next execution: {next_dt.strftime('%A, %B %d at %I:%M %p %Z')} (Hour {next_hour})")
                     
                     # Wait until next execution time
-                    while datetime.datetime.now() < next_dt.replace(tzinfo=None) and not app_state.stop_market_hour:
+                    while datetime.datetime.now(utc).astimezone(eastern) < next_dt and not app_state.stop_market_hour:
                         time.sleep(60)  # Check every minute
                     
                     if app_state.stop_market_hour:
