@@ -67,7 +67,7 @@ def get_api_key(key_name: str, env_var_name: str) -> str:
     3. Config defaults
     """
     # First check runtime API keys (from WebUI localStorage)
-    if key_name in _runtime_api_keys and _runtime_api_keys[key_name]:
+    if key_name in _runtime_api_keys and _runtime_api_keys[key_name] is not None and _runtime_api_keys[key_name] != "":
         return _runtime_api_keys[key_name]
     
     # Then check environment variables
