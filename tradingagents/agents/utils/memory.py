@@ -2,19 +2,24 @@ import chromadb
 from chromadb.config import Settings
 from openai import OpenAI
 import numpy as np
-from tradingagents.dataflows.config import get_api_key
+from tradingagents.dataflows.config import get_openai_client_config, get_openai_embedding_model
 
 
 class FinancialSituationMemory:
     def __init__(self, name):
-        # Get API key from environment variables or config
-        api_key = get_api_key("openai_api_key", "OPENAI_API_KEY")
-        self.client = OpenAI(api_key=api_key)
+        client_config = get_openai_client_config()
+        self.client = OpenAI(**client_config) if client_config else None
+        self.embedding_model = get_openai_embedding_model()
+        self.embeddings_enabled = self.client is not None
+        self._warned_embedding_failure = False
         self.chroma_client = chromadb.Client(Settings(allow_reset=True))
         self.situation_collection = self.chroma_client.get_or_create_collection(name=name)
 
     def get_embedding(self, text):
         """Get OpenAI embedding for a text"""
+        if not self.embeddings_enabled or self.client is None:
+            return None
+
         # Truncate text if it exceeds the model's token limit
         # text-embedding-ada-002 has a max context length of 8192 tokens
         # Conservative estimate: ~3 characters per token for safety margin
@@ -25,13 +30,25 @@ class FinancialSituationMemory:
             text = text[:half_chars] + "\n...[TRUNCATED]...\n" + text[-half_chars:]
             print(f"[MEMORY] Warning: Text truncated to ~{max_chars} characters for embedding")
         
-        response = self.client.embeddings.create(
-            model="text-embedding-ada-002", input=text
-        )
-        return response.data[0].embedding
+        try:
+            response = self.client.embeddings.create(
+                model=self.embedding_model, input=text
+            )
+            return response.data[0].embedding
+        except Exception as exc:
+            self.embeddings_enabled = False
+            if not self._warned_embedding_failure:
+                print(
+                    "[MEMORY] Embeddings unavailable; reflection memory will be skipped "
+                    f"for this run. ({exc})"
+                )
+                self._warned_embedding_failure = True
+            return None
 
     def add_situations(self, situations_and_advice):
         """Add financial situations and their corresponding advice. Parameter is a list of tuples (situation, rec)"""
+        if not self.embeddings_enabled:
+            return
 
         situations = []
         advice = []
@@ -41,10 +58,16 @@ class FinancialSituationMemory:
         offset = self.situation_collection.count()
 
         for i, (situation, recommendation) in enumerate(situations_and_advice):
+            embedding = self.get_embedding(situation)
+            if embedding is None:
+                continue
             situations.append(situation)
             advice.append(recommendation)
             ids.append(str(offset + i))
-            embeddings.append(self.get_embedding(situation))
+            embeddings.append(embedding)
+
+        if not embeddings:
+            return
 
         self.situation_collection.add(
             documents=situations,
@@ -55,7 +78,12 @@ class FinancialSituationMemory:
 
     def get_memories(self, current_situation, n_matches=1):
         """Find matching recommendations using OpenAI embeddings"""
+        if not self.embeddings_enabled:
+            return []
+
         query_embedding = self.get_embedding(current_situation)
+        if query_embedding is None:
+            return []
 
         results = self.situation_collection.query(
             query_embeddings=[query_embedding],

@@ -54,6 +54,9 @@ DEFAULT_CONFIG = {
     "openai_store_responses": False,  # Disable response storing by default to reduce latency/payload
     # API keys (these will be overridden by environment variables if present)
     "openai_api_key": None,
+    "openai_use_local": False,  # Route core LLM calls to a local OpenAI-compatible endpoint
+    "openai_base_url": None,  # Example: http://localhost:1234/v1
+    "openai_embedding_model": "text-embedding-ada-002",
     "finnhub_api_key": None,
     "alpaca_api_key": None,
     "alpaca_secret_key": None,

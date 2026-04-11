@@ -80,6 +80,64 @@ def get_api_key(key_name: str, env_var_name: str) -> str:
     return api_key
 
 
+def _coerce_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
+
+def is_local_openai_enabled() -> bool:
+    """Return True when LLM calls should use an OpenAI-compatible local endpoint."""
+    env_value = os.getenv("OPENAI_USE_LOCAL")
+    if env_value is not None:
+        return _coerce_bool(env_value)
+    config = get_config()
+    return _coerce_bool(config.get("openai_use_local", False))
+
+
+def get_openai_base_url() -> Optional[str]:
+    """Get the configured OpenAI-compatible base URL, if any."""
+    config = get_config()
+    base_url = os.getenv("OPENAI_BASE_URL") or config.get("openai_base_url")
+    return str(base_url).strip() if base_url else None
+
+
+def get_openai_embedding_model() -> str:
+    """Return the embedding model name used by reflection memory."""
+    config = get_config()
+    return (
+        os.getenv("OPENAI_EMBEDDING_MODEL")
+        or config.get("openai_embedding_model")
+        or "text-embedding-ada-002"
+    )
+
+
+def get_openai_client_config() -> Dict[str, str]:
+    """
+    Build OpenAI SDK client kwargs.
+
+    Local mode only applies to generic chat/embedding clients. OpenAI web-search
+    tools should keep their existing cloud-only behavior unless explicitly
+    reworked, because most local OpenAI-compatible servers do not support
+    `responses.create(..., tools=[{"type": "web_search"}])`.
+    """
+    api_key = get_openai_api_key()
+    use_local = is_local_openai_enabled()
+    base_url = get_openai_base_url()
+
+    client_config: Dict[str, str] = {}
+    if use_local and base_url:
+        client_config["base_url"] = base_url
+        client_config["api_key"] = api_key or "local-llm"
+        return client_config
+
+    if api_key:
+        client_config["api_key"] = api_key
+    return client_config
+
+
 def get_openai_api_key() -> str:
     """Get OpenAI API key from runtime, environment variables, or config."""
     return get_api_key("openai_api_key", "OPENAI_API_KEY")

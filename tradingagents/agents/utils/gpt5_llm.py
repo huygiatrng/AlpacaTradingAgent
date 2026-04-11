@@ -143,6 +143,7 @@ class GPT5ChatModel(BaseChatModel):
     
     model: str = "gpt-5-mini"
     api_key: Optional[str] = None
+    base_url: Optional[str] = None
     reasoning_effort: str = "medium"  # Will be mapped to model-specific values
     verbosity: str = "medium"  # low, medium, high
     summary: str = "auto"  # concise, detailed, auto, null
@@ -156,10 +157,12 @@ class GPT5ChatModel(BaseChatModel):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # Initialize the OpenAI client
+        client_kwargs = {}
         if self.api_key:
-            self._client = OpenAI(api_key=self.api_key)
-        else:
-            self._client = OpenAI()  # Uses OPENAI_API_KEY env var
+            client_kwargs["api_key"] = self.api_key
+        if self.base_url:
+            client_kwargs["base_url"] = self.base_url
+        self._client = OpenAI(**client_kwargs) if client_kwargs else OpenAI()
     
     def _get_model_type(self) -> str:
         """Determine the model type for parameter mapping."""
@@ -693,6 +696,7 @@ class GPT5ChatModel(BaseChatModel):
         new_model = GPT5ChatModel(
             model=self.model,
             api_key=self.api_key,
+            base_url=self.base_url,
             reasoning_effort=self.reasoning_effort,
             verbosity=self.verbosity,
             summary=self.summary,
@@ -736,6 +740,8 @@ def get_chat_model(model_name: str, api_key: Optional[str] = None, **kwargs):
     - gpt-5.2: reasoning.effort (none/low/medium/high/xhigh)
     - gpt-5.2-pro: No reasoning effort, just summary
     """
+    base_url = kwargs.pop("base_url", None)
+
     if is_gpt5_model(model_name):
         reasoning_effort = kwargs.pop("reasoning_effort", "medium")
         verbosity = kwargs.pop("verbosity", "medium")
@@ -747,10 +753,16 @@ def get_chat_model(model_name: str, api_key: Optional[str] = None, **kwargs):
         return GPT5ChatModel(
             model=model_name,
             api_key=api_key,
+            base_url=base_url,
             reasoning_effort=reasoning_effort,
             verbosity=verbosity,
             summary=summary,
         )
     else:
         from langchain_openai import ChatOpenAI
-        return ChatOpenAI(model=model_name, openai_api_key=api_key, **kwargs)
+        chat_kwargs = {"model": model_name, **kwargs}
+        if api_key is not None:
+            chat_kwargs["openai_api_key"] = api_key
+        if base_url:
+            chat_kwargs["openai_api_base"] = base_url
+        return ChatOpenAI(**chat_kwargs)

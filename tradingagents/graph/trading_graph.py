@@ -20,7 +20,7 @@ from tradingagents.agents.utils.agent_states import (
 from tradingagents.agents.utils.gpt5_llm import get_chat_model, is_gpt5_model, get_model_params_for_depth, describe_model_params
 from tradingagents.run_logger import get_run_audit_logger
 from tradingagents.dataflows.interface import set_config
-from tradingagents.dataflows.config import get_api_key
+from tradingagents.dataflows.config import get_openai_client_config
 
 from .conditional_logic import ConditionalLogic
 from .setup import GraphSetup
@@ -57,8 +57,9 @@ class TradingAgentsGraph:
             exist_ok=True,
         )
 
-        # Get API key from environment variables or config
-        api_key = get_api_key("openai_api_key", "OPENAI_API_KEY")
+        llm_client_config = get_openai_client_config()
+        api_key = llm_client_config.get("api_key")
+        base_url = llm_client_config.get("base_url")
 
         # Initialize LLMs with appropriate parameters based on model type and research depth
         deep_think_model = self.config["deep_think_llm"]
@@ -85,16 +86,20 @@ class TradingAgentsGraph:
         print(f"[LLM CONFIG] Research Depth: {research_depth}")
         print(f"[LLM CONFIG] Quick Thinker ({quick_think_model}): {quick_params_desc}")
         print(f"[LLM CONFIG] Deep Thinker ({deep_think_model}): {deep_params_desc}")
+        if base_url:
+            print(f"[LLM CONFIG] Using local OpenAI-compatible endpoint: {base_url}")
         
         self.deep_thinking_llm = get_chat_model(
             deep_think_model, 
             api_key=api_key,
+            base_url=base_url,
             **deep_think_kwargs
         )
         
         self.quick_thinking_llm = get_chat_model(
             quick_think_model, 
             api_key=api_key,
+            base_url=base_url,
             **quick_think_kwargs
         )
         
