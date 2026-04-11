@@ -18,18 +18,20 @@ def create_social_media_analyst(llm, toolkit):
         ticker = state["company_of_interest"]
         company_name = state["company_of_interest"]
         is_crypto = "/" in ticker or "USD" in ticker.upper() or "USDT" in ticker.upper()
+        openai_available = toolkit.has_openai_web_search()
 
-        if toolkit.config["online_tools"]:
-            reddit_tool = toolkit.get_reddit_news if is_crypto else toolkit.get_reddit_stock_info
-            tools = [
-                toolkit.get_stock_news_openai,
-                reddit_tool,
-            ]
-        else:
-            tools = [toolkit.get_reddit_news] if is_crypto else [toolkit.get_reddit_stock_info]
+        reddit_tool = toolkit.get_reddit_news if is_crypto else toolkit.get_reddit_stock_info
+        tools = [reddit_tool]
+        if toolkit.config["online_tools"] and openai_available:
+            tools.insert(0, toolkit.get_stock_news_openai)
+
+        source_labels = ["Reddit"]
+        if toolkit.config["online_tools"] and openai_available:
+            source_labels.insert(0, "OpenAI web-search sentiment")
 
         source_guidance = (
-            " When online tools are enabled, use both OpenAI web-search sentiment and Reddit-based social signals before concluding."
+            " Use all currently available social tools before concluding."
+            f" Active sources: {', '.join(source_labels)}."
             + (" Use `get_reddit_news(curr_date)` for crypto context." if is_crypto else " Use `get_reddit_stock_info(ticker, curr_date)` for stock context.")
         )
         system_message = (
@@ -110,16 +112,22 @@ For your reference, the current date is {current_date}. The current company we w
             # Fallback to system message only
             capture_agent_prompt("sentiment_report", system_message, ticker)
 
-        chain = prompt | llm.bind_tools(tools)
+        chain = prompt | (llm.bind_tools(tools) if tools else llm)
 
         # Copy the incoming conversation history so we can append to it when the model makes tool calls
         messages_history = list(state["messages"])
 
         # First LLM response
         result = chain.invoke(messages_history)
+        max_tool_iterations = int(toolkit.config.get("max_tool_iterations_per_agent", 8))
+        max_same_call_repeats = int(toolkit.config.get("max_same_tool_call_repeats", 1))
+        tool_call_counts = {}
+        tool_result_cache = {}
+        iteration_count = 0
 
         # Handle iterative tool calls until the model stops requesting them
-        while getattr(result, "additional_kwargs", {}).get("tool_calls"):
+        while tools and getattr(result, "additional_kwargs", {}).get("tool_calls") and iteration_count < max_tool_iterations:
+            iteration_count += 1
             for tool_call in result.additional_kwargs["tool_calls"]:
                 # Handle different tool call structures
                 if isinstance(tool_call, dict):
@@ -142,15 +150,27 @@ For your reference, the current date is {current_date}. The current company we w
                     tool_result = f"Tool '{tool_name}' not found."
                     print(f"[SOCIAL] ⚠️ {tool_result}")
                 else:
-                    try:
-                        # LangChain Tool objects expose `.run` (string IO) as well as `.invoke` (dict/kwarg IO)
-                        if hasattr(tool_fn, "invoke"):
-                            tool_result = tool_fn.invoke(tool_args)
-                        else:
-                            tool_result = tool_fn.run(**tool_args)
-                        
-                    except Exception as tool_err:
-                        tool_result = f"Error running tool '{tool_name}': {str(tool_err)}"
+                    call_signature = f"{tool_name}:{json.dumps(tool_args, sort_keys=True, default=str)}"
+                    call_count = tool_call_counts.get(call_signature, 0) + 1
+                    tool_call_counts[call_signature] = call_count
+
+                    if call_signature in tool_result_cache:
+                        tool_result = tool_result_cache[call_signature]
+                    elif call_count > max_same_call_repeats:
+                        tool_result = (
+                            f"Skipped repeated tool call '{tool_name}' with identical arguments "
+                            f"after {max_same_call_repeats} execution(s). Reuse previous evidence."
+                        )
+                    else:
+                        try:
+                            # LangChain Tool objects expose `.run` (string IO) as well as `.invoke` (dict/kwarg IO)
+                            if hasattr(tool_fn, "invoke"):
+                                tool_result = tool_fn.invoke(tool_args)
+                            else:
+                                tool_result = tool_fn.run(**tool_args)
+                            tool_result_cache[call_signature] = str(tool_result)
+                        except Exception as tool_err:
+                            tool_result = f"Error running tool '{tool_name}': {str(tool_err)}"
 
                 # Append the assistant tool call and tool result messages so the LLM can continue the conversation
                 tool_call_id = tool_call.get("id") or tool_call.get("tool_call_id")
@@ -168,29 +188,23 @@ For your reference, the current date is {current_date}. The current company we w
 
             # Ask the LLM to continue with the new context
             result = chain.invoke(messages_history)
-        
-        # Enhanced validation and final proposal handling
-        analysis_content = result.content if result.content else ""
-        
-        # Check if we have substantial analysis content (not just final proposal)
-        if len(analysis_content.strip()) < 100 or "FINAL TRANSACTION PROPOSAL:" in analysis_content and len(analysis_content.replace("FINAL TRANSACTION PROPOSAL:", "").strip()) < 100:
-            # Generate fallback analysis if content is too short
-            fallback_prompt = f"""As a swing trading social media analyst, provide a comprehensive social sentiment analysis for {ticker} on {current_date}.
 
-Since detailed social media data may not be available, provide a professional analysis covering:
-1. **General Social Sentiment Trends** for {ticker}
-2. **Social Media Momentum Indicators** 
-3. **Community Positioning Analysis**
-4. **Swing Trading Social Signals**
-5. **Risk Factors from Social Sentiment**
-
-Include the required social sentiment table and conclude with swing trading implications.
-Focus on actionable insights for multi-day (2-10 day) swing trading decisions."""
-            
-            fallback_result = llm.invoke(fallback_prompt)
-            analysis_content = fallback_result.content if hasattr(fallback_result, 'content') else str(fallback_result)
+        if tools and getattr(result, "additional_kwargs", {}).get("tool_calls"):
+            result = AIMessage(
+                content=(
+                    (result.content or "").strip()
+                    + f"\n\nTool-loop halted after {max_tool_iterations} iterations to prevent endless retries."
+                ).strip()
+            )
         
-        # Ensure we have a final recommendation
+        analysis_content = (result.content or "").strip()
+        if not analysis_content:
+            analysis_content = (
+                "The analyst did not return a full social narrative. "
+                "Be explicit about that limitation in the final recommendation."
+            )
+
+        # Ensure we have a final recommendation without replacing tool-grounded evidence.
         if "FINAL TRANSACTION PROPOSAL:" not in analysis_content:
             # Create a final recommendation based on the analysis
             final_prompt = f"""Based on the following social media and sentiment analysis for {ticker}, provide your final swing trading recommendation considering social momentum and sentiment indicators.

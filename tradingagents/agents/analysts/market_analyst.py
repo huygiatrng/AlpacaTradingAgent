@@ -58,29 +58,47 @@ def create_market_analyst(llm, toolkit):
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
         company_name = state["company_of_interest"]
+        is_crypto = "/" in ticker or "USD" in ticker.upper() or "USDT" in ticker.upper()
+        alpaca_available = is_crypto or toolkit.has_alpaca_credentials()
 
-        if toolkit.config["online_tools"]:
+        if toolkit.config["online_tools"] and alpaca_available:
             tools = [
                 toolkit.get_technical_brief,
                 toolkit.get_alpaca_data_report,
                 toolkit.get_stockstats_indicators_report_online,
             ]
-        else:
+        elif toolkit.config["online_tools"] and not alpaca_available:
+            # Keep running with offline stockstats fallback when Alpaca credentials are unavailable.
             tools = [
-                toolkit.get_alpaca_data_report,
                 toolkit.get_stockstats_indicators_report,
             ]
+        else:
+            tools = [toolkit.get_stockstats_indicators_report]
+            if alpaca_available:
+                tools.insert(0, toolkit.get_alpaca_data_report)
 
-        system_message = (
-            """You are a **multi-timeframe technical analyst**. Your input is a structured Technical Brief (JSON) that has already been computed deterministically across three timeframes: **1 h, 4 h, and 1 d**.
+        technical_brief_available = toolkit.config["online_tools"] and alpaca_available
+        indicator_tool_name = (
+            "get_stockstats_indicators_report_online"
+            if technical_brief_available
+            else "get_stockstats_indicators_report"
+        )
+        evidence_sources = []
+        if technical_brief_available:
+            evidence_sources.append(
+                "   - `get_technical_brief` for compact synthesized confirmation"
+            )
+        if alpaca_available:
+            evidence_sources.append("   - `get_alpaca_data_report` for OHLCV context")
+        evidence_sources.append(f"   - `{indicator_tool_name}` for indicator history")
 
-## Your workflow
-
-1. **Use Alpaca + Stockstats tools** as your base evidence:
-   - `get_alpaca_data_report` for OHLCV context
-   - `get_stockstats_indicators_report_online` (or offline variant) for indicator values
-   - `get_technical_brief` for compact synthesized confirmation
-
+        workflow_intro = (
+            "1. **Use the currently available technical tools as your base evidence:**\n"
+            + "\n".join(evidence_sources)
+            + "\n"
+        )
+        if technical_brief_available:
+            workflow_step_two = """
 2. **Call `get_technical_brief`** with the ticker and current date.
    You will receive a JSON object with the following pre-analyzed sections for each timeframe:
    - `trend` – direction, strength (ADX), EMA slope, HH/HL, SMA 200 & distance
@@ -92,8 +110,46 @@ def create_market_analyst(llm, toolkit):
    Plus cross-timeframe fields:
    - `key_levels` – Support/Resist (incl. 3M/6M highs), Pivots, Fibs
    - `signal_summary` – classified setup type and confidence
+"""
+        else:
+            workflow_step_two = (
+                "\n2. **`get_technical_brief` is unavailable in this run.** "
+                "Build the cross-timeframe view from the available price and indicator tools instead.\n"
+            )
 
-3. **Analyze the brief and raw tool evidence** — look for *SWING TRADING* setups:
+        iteration_guidance = (
+            "\n3. **Actively iterate tool calls before concluding**:\n"
+            "   - Run at least 3 indicator-history calls across different indicators and at least 2 timeframes when the tool supports it.\n"
+            "   - Example flow: momentum (`rsi_14`/`macd`) -> trend (`close_8_ema`, `close_21_ema`, `close_50_sma`) -> volatility/risk (`atr_14`, Bollinger).\n"
+            + (
+                "   - Cross-check indicator history against price levels from Alpaca.\n"
+                if alpaca_available
+                else "   - Do not request unavailable Alpaca data; rely on indicator history and explicitly state that limitation.\n"
+            )
+        )
+
+        system_intro = (
+            "You are a **multi-timeframe technical analyst**. "
+            + (
+                "Your input includes a structured Technical Brief (JSON) that has already been computed deterministically across three timeframes: **1 h, 4 h, and 1 d**.\n"
+                if technical_brief_available
+                else "Build the technical view directly from the raw price and indicator tools available in this run.\n"
+            )
+        )
+        anchor_guidance = (
+            "**Important**: Anchor your thesis in both Alpaca price action and Stockstats indicators."
+            if alpaca_available
+            else "**Important**: Anchor your thesis in the available Stockstats evidence and explicitly note that Alpaca price data is unavailable."
+        )
+
+        system_message = (
+            system_intro
+            + "\n\n## Your workflow\n\n"
+            + workflow_intro
+            + workflow_step_two
+            + iteration_guidance
+            + """
+4. **Analyze the brief and raw tool evidence** — look for *SWING TRADING* setups:
    - **Trend Strength**: Is ADX > 25? Are we above SMA 200 (Long-term trend)?
    - **Gap Ups**: Did price gap up (>1-2%) over a Key Level (e.g., 3-Month High)?
    - **Oversold Bounce**: Is price far below SMA 200 but reclaiming EMA 8? Stoch RSI crossing up?
@@ -101,7 +157,7 @@ def create_market_analyst(llm, toolkit):
    - **Entry Timing**: Look for Stoch RSI crossovers or pullback to EMA 8.
    - **Confluence**: Do 4h and 1d agree?
 
-4. **Produce your analysis** with these sections:
+5. **Produce your analysis** with these sections:
 
 ## Conclusion
 State **BULLISH**, **BEARISH**, or **NEUTRAL** with a 1-sentence rationale.
@@ -136,7 +192,8 @@ Conclude with: **FINAL TRANSACTION PROPOSAL: BUY/HOLD/SELL** and a brief justifi
 - Keep each section on separate lines. Do not output inline "a) ... b) ... c) ..." formatting.
 - Keep table rows on separate lines (valid markdown table syntax).
 
-**Important**: Anchor your thesis in both Alpaca price action and Stockstats indicators."""
+"""
+            + anchor_guidance
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -185,16 +242,22 @@ For your reference, the current date is {current_date}. The company we want to l
             # Fallback to system message only
             capture_agent_prompt("market_report", system_message, ticker)
 
-        chain = prompt | llm.bind_tools(tools)
+        chain = prompt | (llm.bind_tools(tools) if tools else llm)
 
         # Copy the incoming conversation history so we can append to it when the model makes tool calls
         messages_history = list(state["messages"])
 
         # First LLM response
         result = chain.invoke(messages_history)
+        max_tool_iterations = int(toolkit.config.get("max_tool_iterations_per_agent", 8))
+        max_same_call_repeats = int(toolkit.config.get("max_same_tool_call_repeats", 1))
+        tool_call_counts = {}
+        tool_result_cache = {}
+        iteration_count = 0
 
         # Handle iterative tool calls until the model stops requesting them
-        while getattr(result, "additional_kwargs", {}).get("tool_calls"):
+        while tools and getattr(result, "additional_kwargs", {}).get("tool_calls") and iteration_count < max_tool_iterations:
+            iteration_count += 1
             for tool_call in result.additional_kwargs["tool_calls"]:
                 # Handle different tool call structures
                 if isinstance(tool_call, dict):
@@ -217,15 +280,27 @@ For your reference, the current date is {current_date}. The company we want to l
                     tool_result = f"Tool '{tool_name}' not found."
                     print(f"[MARKET] ⚠️ {tool_result}")
                 else:
-                    try:
-                        # LangChain Tool objects expose `.run` (string IO) as well as `.invoke` (dict/kwarg IO)
-                        if hasattr(tool_fn, "invoke"):
-                            tool_result = tool_fn.invoke(tool_args)
-                        else:
-                            tool_result = tool_fn.run(**tool_args)
-                        
-                    except Exception as tool_err:
-                        tool_result = f"Error running tool '{tool_name}': {str(tool_err)}"
+                    call_signature = f"{tool_name}:{json.dumps(tool_args, sort_keys=True, default=str)}"
+                    call_count = tool_call_counts.get(call_signature, 0) + 1
+                    tool_call_counts[call_signature] = call_count
+
+                    if call_signature in tool_result_cache:
+                        tool_result = tool_result_cache[call_signature]
+                    elif call_count > max_same_call_repeats:
+                        tool_result = (
+                            f"Skipped repeated tool call '{tool_name}' with identical arguments "
+                            f"after {max_same_call_repeats} execution(s). Reuse previous evidence."
+                        )
+                    else:
+                        try:
+                            # LangChain Tool objects expose `.run` (string IO) as well as `.invoke` (dict/kwarg IO)
+                            if hasattr(tool_fn, "invoke"):
+                                tool_result = tool_fn.invoke(tool_args)
+                            else:
+                                tool_result = tool_fn.run(**tool_args)
+                            tool_result_cache[call_signature] = str(tool_result)
+                        except Exception as tool_err:
+                            tool_result = f"Error running tool '{tool_name}': {str(tool_err)}"
 
                 # Append the assistant tool call and tool result messages so the LLM can continue the conversation
                 tool_call_id = tool_call.get("id") or tool_call.get("tool_call_id")
@@ -243,14 +318,29 @@ For your reference, the current date is {current_date}. The company we want to l
 
             # Ask the LLM to continue with the new context
             result = chain.invoke(messages_history)
+
+        if tools and getattr(result, "additional_kwargs", {}).get("tool_calls"):
+            result = AIMessage(
+                content=(
+                    (result.content or "").strip()
+                    + f"\n\nTool-loop halted after {max_tool_iterations} iterations to prevent endless retries."
+                ).strip()
+            )
         
+        analysis_content = (result.content or "").strip()
+        if not analysis_content:
+            analysis_content = (
+                "The analyst did not return a complete technical narrative. "
+                "State the limitation clearly in the final recommendation."
+            )
+
         # Check if the result already contains FINAL TRANSACTION PROPOSAL
-        if "FINAL TRANSACTION PROPOSAL:" not in result.content:
+        if "FINAL TRANSACTION PROPOSAL:" not in analysis_content:
             # Create a simple prompt that includes the analysis content directly
             final_prompt = f"""Based on the following market and technical analysis for {ticker}, please provide your final trading recommendation.
 
 Analysis:
-{result.content}
+{analysis_content}
 
 You must conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** followed by a brief justification."""
             
@@ -259,10 +349,10 @@ You must conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** followed b
             final_result = final_chain.invoke(final_prompt)
             
             # Combine the analysis with the final proposal
-            combined_content = result.content + "\n\n" + final_result.content
+            combined_content = analysis_content + "\n\n" + final_result.content
             result = AIMessage(content=_normalize_market_report_markdown(combined_content))
         else:
-            result = AIMessage(content=_normalize_market_report_markdown(result.content))
+            result = AIMessage(content=_normalize_market_report_markdown(analysis_content))
 
         return {
             "messages": [result],

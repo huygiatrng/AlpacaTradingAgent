@@ -20,31 +20,38 @@ def create_macro_analyst(llm, toolkit):
         try:
             current_date = state["trade_date"]
             ticker = state.get("company_of_interest", "MARKET")
+            fred_available = toolkit.has_fred()
+            openai_available = toolkit.has_openai_web_search()
             
             # print(f"[MACRO] Analyzing macro environment on {current_date}")
             
-            # Macro analysis uses the same tools regardless of online/offline mode
-            # since it's focused on economic data rather than company-specific data
-            if toolkit.config["online_tools"]:
-                tools = [
-                    toolkit.get_macro_analysis,
-                    toolkit.get_economic_indicators,
-                    toolkit.get_yield_curve_analysis,
-                    toolkit.get_macro_news_openai,
-                ]
-                # print(f"[MACRO] Using online macro tools: FRED API + OpenAI web search")
-            else:
-                # For offline mode, we still use the same tools but they may use cached data
-                tools = [
-                    toolkit.get_macro_analysis,
-                    toolkit.get_economic_indicators,
-                    toolkit.get_yield_curve_analysis,
-                ]
-                # print(f"[MACRO] Using offline macro tools: Cached Economic Data")
+            tools = []
+            if fred_available:
+                tools.extend(
+                    [
+                        toolkit.get_macro_analysis,
+                        toolkit.get_economic_indicators,
+                        toolkit.get_yield_curve_analysis,
+                    ]
+                )
+            if toolkit.config["online_tools"] and openai_available:
+                tools.append(toolkit.get_macro_news_openai)
+
+            active_sources = []
+            if fred_available:
+                active_sources.append("FRED macro data")
+            macro_news_available = toolkit.config["online_tools"] and openai_available
+            if macro_news_available:
+                active_sources.append("OpenAI macro web search")
 
             source_guidance = (
-                " When online tools are enabled, combine FRED-based macro data tools and OpenAI web-search macro news before concluding."
-                f" Use `get_macro_news_openai(curr_date, ticker_context='{ticker}')` for relevance."
+                " Combine all currently available macro tools before concluding."
+                f" Active sources: {', '.join(active_sources) if active_sources else 'none'}."
+                + (
+                    f" Use `get_macro_news_openai(curr_date, ticker_context='{ticker}')` for relevance."
+                    if macro_news_available
+                    else ""
+                )
             )
 
             system_message = (
@@ -124,7 +131,7 @@ For your reference, the current date is {current_date}. Focus on macroeconomic c
                 # Fallback to system message only
                 capture_agent_prompt("macro_report", system_message, ticker)
 
-            chain = prompt | llm.bind_tools(tools)
+            chain = prompt | (llm.bind_tools(tools) if tools else llm)
             
             # print(f"[MACRO] Invoking LLM chain...")
             # Maintain a copy of the conversation history for iterative tool use
@@ -138,10 +145,13 @@ For your reference, the current date is {current_date}. Focus on macroeconomic c
             successful_tools = []
 
             # Loop to automatically execute any requested tool calls
-            max_iterations = 10  # Prevent infinite loops
+            max_iterations = int(toolkit.config.get("max_tool_iterations_per_agent", 8))
+            max_same_call_repeats = int(toolkit.config.get("max_same_tool_call_repeats", 1))
+            tool_call_counts = {}
+            tool_result_cache = {}
             iteration_count = 0
             
-            while getattr(result, "additional_kwargs", {}).get("tool_calls") and iteration_count < max_iterations:
+            while tools and getattr(result, "additional_kwargs", {}).get("tool_calls") and iteration_count < max_iterations:
                 iteration_count += 1
                 # print(f"[MACRO] Tool execution iteration {iteration_count}")
                 
@@ -167,36 +177,49 @@ For your reference, the current date is {current_date}. Focus on macroeconomic c
                         print(f"[MACRO] ⚠️ {tool_result}")
                         tool_failures.append(tool_name)
                     else:
-                        try:
-                            if hasattr(tool_fn, "invoke"):
-                                tool_result = tool_fn.invoke(tool_args)
-                            else:
-                                tool_result = tool_fn.run(**tool_args)
-                            
-                            successful_tools.append(tool_name)
-                            
-                            # Check if tool returned an actual error message (be more specific)
-                            # Only flag as error if the entire result is an error, not if it contains error sections
-                            if isinstance(tool_result, str) and (
-                                tool_result.lower().startswith("error") or 
-                                (len(tool_result) < 200 and (
-                                    "api key not found" in tool_result.lower() or
-                                    "failed to fetch" in tool_result.lower() or
-                                    "connection error" in tool_result.lower()
-                                ))
-                            ):
-                                print(f"[MACRO] ⚠️ Tool '{tool_name}' returned error: {tool_result[:100]}...")
+                        call_signature = f"{tool_name}:{json.dumps(tool_args, sort_keys=True, default=str)}"
+                        call_count = tool_call_counts.get(call_signature, 0) + 1
+                        tool_call_counts[call_signature] = call_count
+
+                        if call_signature in tool_result_cache:
+                            tool_result = tool_result_cache[call_signature]
+                        elif call_count > max_same_call_repeats:
+                            tool_result = (
+                                f"Skipped repeated tool call '{tool_name}' with identical arguments "
+                                f"after {max_same_call_repeats} execution(s). Reuse previous evidence."
+                            )
+                        else:
+                            try:
+                                if hasattr(tool_fn, "invoke"):
+                                    tool_result = tool_fn.invoke(tool_args)
+                                else:
+                                    tool_result = tool_fn.run(**tool_args)
+                                tool_result_cache[call_signature] = str(tool_result)
+
+                                successful_tools.append(tool_name)
+
+                                # Check if tool returned an actual error message (be more specific)
+                                # Only flag as error if the entire result is an error, not if it contains error sections
+                                if isinstance(tool_result, str) and (
+                                    tool_result.lower().startswith("error") or
+                                    (len(tool_result) < 200 and (
+                                        "api key not found" in tool_result.lower() or
+                                        "failed to fetch" in tool_result.lower() or
+                                        "connection error" in tool_result.lower()
+                                    ))
+                                ):
+                                    print(f"[MACRO] ⚠️ Tool '{tool_name}' returned error: {tool_result[:100]}...")
+                                    tool_failures.append(tool_name)
+                                elif isinstance(tool_result, str) and len(tool_result) > 100:
+                                    # This is likely a valid report, even if it contains some error sections
+                                    # Don't flag as a complete failure
+                                    print(f"[MACRO] 📊 Tool '{tool_name}' returned report with {len(tool_result)} characters")
+                                else:
+                                    print(f"[MACRO] ✅ Tool '{tool_name}' completed successfully")
+
+                            except Exception as tool_err:
+                                tool_result = f"Error running tool '{tool_name}': {str(tool_err)}"
                                 tool_failures.append(tool_name)
-                            elif isinstance(tool_result, str) and len(tool_result) > 100:
-                                # This is likely a valid report, even if it contains some error sections
-                                # Don't flag as a complete failure
-                                print(f"[MACRO] 📊 Tool '{tool_name}' returned report with {len(tool_result)} characters")
-                            else:
-                                print(f"[MACRO] ✅ Tool '{tool_name}' completed successfully")
-                                
-                        except Exception as tool_err:
-                            tool_result = f"Error running tool '{tool_name}': {str(tool_err)}"
-                            tool_failures.append(tool_name)
 
                     tool_call_id = tool_call.get("id") or tool_call.get("tool_call_id")
                     ai_tool_call_msg = AIMessage(content="", additional_kwargs={"tool_calls": [tool_call]})
@@ -209,6 +232,14 @@ For your reference, the current date is {current_date}. Focus on macroeconomic c
                 except Exception as e:
                     print(f"[MACRO] ❌ Error in LLM chain iteration {iteration_count}: {e}")
                     break
+
+            if tools and getattr(result, "additional_kwargs", {}).get("tool_calls"):
+                result = AIMessage(
+                    content=(
+                        (result.content or "").strip()
+                        + f"\n\nTool-loop halted after {max_iterations} iterations to prevent endless retries."
+                    ).strip()
+                )
             
             # If we had tool failures, let the LLM know and ask for a general analysis
             if tool_failures and not successful_tools:
@@ -268,6 +299,28 @@ Based on current market conditions as of {current_date}:
 **Note**: For complete macro analysis, configure FRED_API_KEY environment variable.
 """
                     })()
+
+            analysis_content = (result.content or "").strip()
+            if not analysis_content:
+                analysis_content = (
+                    "Macro analysis was limited by unavailable tools. "
+                    "State the limitation clearly in the final recommendation."
+                )
+
+            if "FINAL TRANSACTION PROPOSAL:" not in analysis_content:
+                final_prompt = f"""Based on the following macro analysis for {current_date}, provide your final swing trading recommendation considering macroeconomic conditions and sector implications.
+
+Analysis:
+{analysis_content}
+
+Provide a brief justification and conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**"""
+                final_result = llm.invoke(final_prompt)
+                final_content = final_result.content if hasattr(final_result, "content") else str(final_result)
+                result = AIMessage(
+                    content=analysis_content + "\n\n---\n\n## Final Recommendation\n\n" + final_content
+                )
+            else:
+                result = AIMessage(content=analysis_content)
             
             elapsed_time = time.time() - start_time
             # print(f"[MACRO] ✅ Analysis completed in {elapsed_time:.2f} seconds")
