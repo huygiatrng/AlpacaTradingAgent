@@ -417,12 +417,12 @@ def register_control_callbacks(app):
                         html.Li("Execute trades automatically after analysis", style={"color": "black"}),
                         html.Li("Use fractional shares based on dollar amount", style={"color": "black"}),
                         html.Li("Follow position management rules", style={"color": "black"}),
-                        html.Li("All trades execute via Alpaca paper trading", style={"color": "black"})
+                        html.Li("All trades execute via your configured Alpaca account", style={"color": "black"})
                     ], className="mb-1")
                 ], className="mb-2"),
                 html.P([
                     html.Strong("Warning: ", style={"color": "black"}),
-                    html.Span("Ensure Alpaca API keys are configured for paper trading", style={"color": "black"})
+                    html.Span("Ensure Alpaca API keys are configured (paper or live trading mode)", style={"color": "black"})
                 ], className="mb-0")
             ], style={"backgroundColor": "#fff3cd"})
         ])

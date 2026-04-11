@@ -14,6 +14,20 @@ def register_trading_callbacks(app):
     """Register all trading and Alpaca-related callbacks"""
 
     @app.callback(
+        Output("alpaca-account-title", "children"),
+        Input("api-keys-store", "data")
+    )
+    def update_account_title(stored_keys):
+        """Update account section title to reflect current paper/live trading mode"""
+        if isinstance(stored_keys, dict) and "alpaca-paper" in stored_keys:
+            use_paper_val = stored_keys["alpaca-paper"]
+        else:
+            from tradingagents.dataflows.config import get_alpaca_use_paper
+            use_paper_val = get_alpaca_use_paper()
+        is_paper = str(use_paper_val).strip().lower() not in ("false", "0", "no")
+        return f"Alpaca {'Paper' if is_paper else 'Live'} Trading Account"
+
+    @app.callback(
         [Output("positions-table-container", "children"),
          Output("orders-table-container", "children")],
         [Input("slow-refresh-interval", "n_intervals"),

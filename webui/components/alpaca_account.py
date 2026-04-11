@@ -8,6 +8,7 @@ import pandas as pd
 from datetime import datetime
 import pytz
 from tradingagents.dataflows.alpaca_utils import AlpacaUtils
+from tradingagents.dataflows.config import get_alpaca_use_paper
 
 def render_positions_table():
     """Render the enhanced positions table with liquidate buttons"""
@@ -301,10 +302,13 @@ def get_recent_orders(page=1, page_size=7):
 
 def render_alpaca_account_section():
     """Render the complete Alpaca account section"""
+    use_paper_str = get_alpaca_use_paper()
+    is_paper = str(use_paper_str).strip().lower() not in ("false", "0", "no")
+    account_mode_label = "Paper Trading" if is_paper else "Live Trading"
     return html.Div([
         html.H4([
             html.I(className="fas fa-chart-line me-2"),
-            "Alpaca Paper Trading Account", 
+            html.Span(f"Alpaca {account_mode_label} Account", id="alpaca-account-title"),
             html.Button([
                 html.I(className="fas fa-sync-alt")
             ], 

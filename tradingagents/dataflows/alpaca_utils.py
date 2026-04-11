@@ -11,7 +11,7 @@ from alpaca.data.enums import DataFeed
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import GetAssetsRequest, GetOrdersRequest, MarketOrderRequest, ClosePositionRequest
 from alpaca.trading.enums import AssetClass, OrderSide, TimeInForce
-from .config import get_api_key
+from .config import get_api_key, get_alpaca_use_paper
 
 
 # Fallback dictionary for company names
@@ -86,7 +86,8 @@ def get_alpaca_trading_client() -> TradingClient:
     api_secret = get_api_key("alpaca_secret_key", "ALPACA_SECRET_KEY")
     if not api_key or not api_secret:
         raise ValueError("Alpaca API key or secret not found. Please set ALPACA_API_KEY and ALPACA_SECRET_KEY.")
-    return TradingClient(api_key, api_secret, paper=True)
+    use_paper = str(get_alpaca_use_paper() or "True").strip().lower() not in ("false", "0", "no")
+    return TradingClient(api_key, api_secret, paper=use_paper)
 
 
 def _parse_timeframe(tf: Union[str, TimeFrame]) -> TimeFrame:
