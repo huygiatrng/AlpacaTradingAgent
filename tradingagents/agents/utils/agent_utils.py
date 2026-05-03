@@ -13,6 +13,7 @@ from langchain_openai import ChatOpenAI
 import tradingagents.dataflows.interface as interface
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.run_logger import get_run_audit_logger
+from tradingagents.dataflows.config import get_api_key
 import json
 import time
 from functools import wraps
@@ -23,6 +24,11 @@ TOOL_MIN_OUTPUT_CHARS = {
     "get_global_news_openai": 500,
     "get_fundamentals_openai": 350,
     "get_macro_analysis": 280,
+}
+
+DEFAULT_SEMANTIC_RETRY_DISABLED_TOOLS = {
+    "get_global_news_openai",
+    "get_macro_news_openai",
 }
 
 INTERACTIVE_FOLLOWUP_PATTERNS = (
@@ -44,6 +50,7 @@ VALID_SHORT_OUTPUT_PATTERNS = (
     "no earnings data found",
     "not found for",
     "no data available",
+    "fallback used because openai",
 )
 
 
@@ -155,6 +162,55 @@ def _score_output_quality(tool_name: str, output: object) -> dict:
     }
 
 
+def _semantic_retry_disabled_tools(config: dict | None = None) -> set[str]:
+    config = config or {}
+    configured = config.get(
+        "tool_semantic_retry_disabled_tools",
+        DEFAULT_SEMANTIC_RETRY_DISABLED_TOOLS,
+    )
+    if configured is None:
+        return set()
+    if isinstance(configured, str):
+        return {name.strip() for name in configured.split(",") if name.strip()}
+    try:
+        return {str(name).strip() for name in configured if str(name).strip()}
+    except TypeError:
+        return set(DEFAULT_SEMANTIC_RETRY_DISABLED_TOOLS)
+
+
+def _should_retry_tool_output(
+    tool_name: str,
+    *,
+    uses_web_search: bool,
+    semantic_retry_enabled: bool,
+    retry_count: int,
+    max_semantic_retries: int,
+    quality: dict,
+    config: dict | None = None,
+) -> bool:
+    if not (
+        uses_web_search
+        and semantic_retry_enabled
+        and retry_count < max_semantic_retries
+        and quality.get("retry_recommended", False)
+    ):
+        return False
+
+    if tool_name in _semantic_retry_disabled_tools(config):
+        return False
+
+    # Avoid expensive second global-news web search when the first result
+    # is already substantive, even if it ends with an interactive tail.
+    if (
+        tool_name == "get_global_news_openai"
+        and quality.get("output_chars", 0)
+        >= TOOL_MIN_OUTPUT_CHARS.get(tool_name, 0)
+    ):
+        return False
+
+    return True
+
+
 def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
     """
     Decorator to time function calls and track them for UI display with timeout protection
@@ -162,12 +218,8 @@ def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
     Args:
         analyst_type: Type of analyst (MARKET, SOCIAL, etc.)
         timeout_seconds: Maximum execution time allowed (default 120s)
-        uses_web_search: If True, allows longer timeout for web search operations (adds 90s)
+        uses_web_search: If True, applies a small configurable timeout extension for web tools
     """
-    # Web search tools need more time due to external API latency
-    if uses_web_search:
-        timeout_seconds = timeout_seconds + 180  # Give web search extra time (total 300s)
-    
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -223,11 +275,28 @@ def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
                 semantic_retry_enabled = Toolkit._config.get("tool_semantic_retry_enabled", True)
                 max_semantic_retries = int(Toolkit._config.get("tool_semantic_retry_max_retries", 1))
                 retry_backoff_seconds = float(Toolkit._config.get("tool_semantic_retry_backoff_seconds", 0.8))
+                base_timeout_seconds = float(timeout_seconds)
+                web_search_timeout_extension = 0.0
+                if uses_web_search:
+                    web_search_timeout_extension = float(
+                        Toolkit._config.get("web_search_timeout_extension_seconds", 45)
+                    )
+                effective_timeout_seconds = max(
+                    10.0, base_timeout_seconds + web_search_timeout_extension
+                )
 
                 def _execute_once():
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                        future = executor.submit(run_function)
-                        return future.result(timeout=timeout_seconds)
+                    # Do not use context manager here: on timeout, __exit__ waits for worker completion.
+                    # That defeats timeout enforcement and can block for several extra minutes.
+                    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                    future = executor.submit(run_function)
+                    try:
+                        return future.result(timeout=effective_timeout_seconds)
+                    except concurrent.futures.TimeoutError:
+                        future.cancel()
+                        raise
+                    finally:
+                        executor.shutdown(wait=False, cancel_futures=True)
 
                 retry_count = 0
                 quality_details = {}
@@ -241,7 +310,10 @@ def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
                         result = _execute_once()
                     except concurrent.futures.TimeoutError:
                         elapsed = time.time() - start_time
-                        timeout_msg = f"TIMEOUT: Tool '{tool_name}' exceeded {timeout_seconds}s limit (stopped at {elapsed:.1f}s)"
+                        timeout_msg = (
+                            f"TIMEOUT: Tool '{tool_name}' exceeded {effective_timeout_seconds:.1f}s "
+                            f"limit (stopped at {elapsed:.1f}s)"
+                        )
                         print(f"[{analyst_type}] ⏰ {timeout_msg}")
 
                         tool_call_info = {
@@ -255,7 +327,7 @@ def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
                             "symbol": getattr(app_state, 'analyzing_symbol', None) or getattr(app_state, 'current_symbol', None),
                             "error_details": {
                                 "error_type": "TimeoutError",
-                                "timeout_seconds": timeout_seconds,
+                                "timeout_seconds": effective_timeout_seconds,
                                 "actual_time": elapsed
                             },
                             "retry_count": retry_count,
@@ -277,7 +349,10 @@ def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
                             retry_count=retry_count,
                         )
 
-                        return f"Error: Tool '{tool_name}' timed out after {timeout_seconds}s. This may indicate network issues, API problems, or insufficient data."
+                        return (
+                            f"Error: Tool '{tool_name}' timed out after {effective_timeout_seconds:.1f}s. "
+                            "This may indicate network issues, API problems, or insufficient data."
+                        )
 
                     # Check for very slow execution
                     partial_elapsed = time.time() - start_time
@@ -304,21 +379,15 @@ def timing_wrapper(analyst_type, timeout_seconds=120, uses_web_search=False):
                         best_quality = quality
                         best_result = result
 
-                    should_retry = (
-                        uses_web_search
-                        and semantic_retry_enabled
-                        and retry_count < max_semantic_retries
-                        and quality.get("retry_recommended", False)
+                    should_retry = _should_retry_tool_output(
+                        tool_name,
+                        uses_web_search=uses_web_search,
+                        semantic_retry_enabled=semantic_retry_enabled,
+                        retry_count=retry_count,
+                        max_semantic_retries=max_semantic_retries,
+                        quality=quality,
+                        config=Toolkit._config,
                     )
-                    # Avoid expensive second global-news web search when the first result
-                    # is already substantive, even if it ends with an interactive tail.
-                    if (
-                        should_retry
-                        and tool_name == "get_global_news_openai"
-                        and quality.get("output_chars", 0)
-                        >= TOOL_MIN_OUTPUT_CHARS.get(tool_name, 0)
-                    ):
-                        should_retry = False
                     if not should_retry:
                         quality_details = quality
                         break
@@ -493,6 +562,61 @@ class Toolkit:
             self.update_config(config)
 
     @staticmethod
+    def _has_key(config_key: str, env_key: str) -> bool:
+        try:
+            return bool(get_api_key(config_key, env_key))
+        except Exception:
+            return False
+
+    def has_openai_web_search(self) -> bool:
+        return self._has_key("openai_api_key", "OPENAI_API_KEY")
+
+    def has_finnhub(self) -> bool:
+        return self._has_key("finnhub_api_key", "FINNHUB_API_KEY")
+
+    def has_alpaca_credentials(self) -> bool:
+        return self._has_key("alpaca_api_key", "ALPACA_API_KEY") and self._has_key(
+            "alpaca_secret_key", "ALPACA_SECRET_KEY"
+        )
+
+    def has_fred(self) -> bool:
+        return self._has_key("fred_api_key", "FRED_API_KEY")
+
+    def has_coindesk(self) -> bool:
+        return self._has_key("coindesk_api_key", "COINDESK_API_KEY")
+
+    def has_simfin_data(self) -> bool:
+        data_dir = self.config.get("data_dir", "")
+        if not data_dir:
+            return False
+
+        statement_paths = {
+            "balance": ("balance_sheets", "us-balance-{freq}.csv"),
+            "cashflow": ("cashflow", "us-cashflow-{freq}.csv"),
+            "income": ("income_statements", "us-income-{freq}.csv"),
+        }
+
+        # Consider SimFin available if one full frequency set exists.
+        for freq in ("annual", "quarterly"):
+            all_present = True
+            for folder, pattern in statement_paths.values():
+                full_path = os.path.join(
+                    data_dir,
+                    "simfin_data_all",
+                    folder,
+                    "companies",
+                    "us",
+                    pattern.format(freq=freq),
+                )
+                if not os.path.exists(full_path):
+                    all_present = False
+                    break
+            if all_present:
+                return True
+
+        return False
+
+    @staticmethod
     @tool
     @timing_wrapper("NEWS")
     def get_reddit_news(
@@ -661,66 +785,32 @@ class Toolkit:
             str, "The current trading date you are trading on, YYYY-mm-dd"
         ],
         look_back_days: Annotated[int, "how many days to look back"] = 30,
+        timeframe: Annotated[str, "Chart timeframe: 1Hour, 4Hour, 1Day"] = "1Day",
+        max_points: Annotated[int, "Maximum historical data points to return"] = 30,
     ) -> str:
         """
-        Retrieve technical indicators for stocks and crypto symbols.
-        For crypto symbols, use format with slash: ETH/USD, BTC/USD, SOL/USD
-        For stock symbols, use standard format: AAPL, TSM, NVDA
+        Retrieve indicator history with configurable indicator + timeframe.
+        This tool is designed for iterative technical analysis:
+        call it multiple times with different indicator/timeframe combinations.
+
         Args:
             symbol (str): Ticker symbol - stocks: AAPL, TSM; crypto: ETH/USD, BTC/USD
-            indicator (str): Technical indicator to get the analysis and report of, or 'all' for comprehensive report
+            indicator (str): Indicator name (e.g. rsi_14, macd, close_8_ema, atr_14, all)
             curr_date (str): The current trading date you are trading on, YYYY-mm-dd
-            look_back_days (int): How many days to look back, default is 30
+            look_back_days (int): Calendar days to include in history
+            timeframe (str): 1Hour, 4Hour, or 1Day
+            max_points (int): Max rows returned in history table
         Returns:
-            str: A formatted report containing the stock stats indicators for the specified ticker symbol and indicator.
+            str: Indicator history report with latest values and a history table.
         """
-
-        if indicator.lower() == 'all':
-            # Handle comprehensive indicator report
-            key_indicators = [
-                'close_10_ema',     # 10-day Exponential Moving Average
-                'close_20_sma',     # 20-day Simple Moving Average  
-                'close_50_sma',     # 50-day Simple Moving Average
-                'rsi_14',           # 14-day Relative Strength Index
-                'macd',             # Moving Average Convergence Divergence
-                'boll_ub',          # Bollinger Bands Upper Band
-                'boll_lb',          # Bollinger Bands Lower Band
-                'volume_delta'      # Volume Delta
-            ]
-            
-            results = []
-            results.append(f"# Comprehensive Technical Indicators Report for {symbol} on {curr_date}")
-            results.append("")
-            
-            for ind in key_indicators:
-                try:
-                    result = interface.get_stockstats_indicator(symbol, ind, curr_date, True)
-                    # Clean up the result format
-                    if result.startswith(f"## {ind} for"):
-                        # Extract just the value part
-                        value_part = result.split(": ")[-1]
-                        indicator_name = ind.replace('_', ' ').title()
-                        results.append(f"**{indicator_name}:** {value_part}")
-                    else:
-                        results.append(f"**{ind}:** {result}")
-                except Exception as e:
-                    results.append(f"**{ind}:** Error - {str(e)}")
-            
-            results.append("")
-            results.append("## Swing Trading Analysis")
-            results.append("These indicators provide key signals for swing trading decisions (2-10 day holds):")
-            results.append("- **EMAs/SMAs:** Trend direction and support/resistance levels")
-            results.append("- **RSI:** Overbought (>70) or oversold (<30) conditions")  
-            results.append("- **MACD:** Momentum and trend change signals")
-            results.append("- **Bollinger Bands:** Volatility and price extremes")
-            
-            return "\n".join(results)
-        else:
-            # For single indicator, use the existing method
-            result_stockstats = interface.get_stockstats_indicator(
-                symbol, indicator, curr_date, True
-            )
-            return result_stockstats
+        return interface.get_stockstats_indicator_history(
+            symbol=symbol,
+            indicator=indicator,
+            curr_date=curr_date,
+            timeframe=timeframe,
+            look_back_days=look_back_days,
+            max_points=max_points,
+        )
 
     @staticmethod
     @tool
@@ -824,6 +914,7 @@ class Toolkit:
 
     @staticmethod
     @tool
+    @timing_wrapper("NEWS")
     def get_coindesk_news(
         ticker: Annotated[str, "Ticker symbol, e.g. 'BTC/USD', 'ETH/USD', 'ETH', etc."],
         num_sentences: Annotated[int, "Number of sentences to include from news body."] = 5,
@@ -1057,10 +1148,14 @@ class Toolkit:
             str: Macro/global-news analysis grounded in web search.
         """
 
-        return interface.get_global_news_openai(curr_date, ticker_context)
+        context = str(ticker_context or "financial markets").strip()
+        if "financial markets" not in context.lower():
+            context = f"financial markets and {context}"
+        return interface.get_global_news_openai(curr_date, context)
 
     @staticmethod
     @tool
+    @timing_wrapper("MACRO")
     def get_economic_indicators(
         curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
         lookback_days: Annotated[int, "Number of days to look back for data"] = 90,
@@ -1084,6 +1179,7 @@ class Toolkit:
 
     @staticmethod
     @tool
+    @timing_wrapper("MACRO")
     def get_yield_curve_analysis(
         curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
     ) -> str:
@@ -1129,6 +1225,7 @@ class Toolkit:
 
     @staticmethod
     @tool
+    @timing_wrapper("MARKET")
     def get_alpaca_data_report(
         symbol: Annotated[str, "ticker symbol of the company"],
         curr_date: Annotated[str, "Start date in yyyy-mm-dd format"],

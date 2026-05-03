@@ -2,12 +2,17 @@ import questionary
 from typing import List, Optional, Tuple, Dict
 from rich import console
 from cli.models import AnalystType
+from tradingagents.openai_model_registry import (
+    get_llm_provider_options,
+    get_model_options_for_provider,
+)
 
 ANALYST_ORDER = [
     ("Market Analyst", AnalystType.MARKET),
     ("Social Media Analyst", AnalystType.SOCIAL),
     ("News Analyst", AnalystType.NEWS),
     ("Fundamentals Analyst", AnalystType.FUNDAMENTALS),
+    ("Macro Analyst", AnalystType.MACRO),
 ]
 
 
@@ -122,20 +127,104 @@ def select_research_depth() -> int:
     return choice
 
 
-def select_shallow_thinking_agent() -> str:
+def select_llm_provider() -> str:
+    provider_options = [
+        (option["label"], option["value"])
+        for option in get_llm_provider_options()
+    ]
+    choice = questionary.select(
+        "Select Your [LLM Provider]:",
+        choices=[questionary.Choice(display, value=value) for display, value in provider_options],
+        instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
+        style=questionary.Style(
+            [
+                ("selected", "fg:cyan noinherit"),
+                ("highlighted", "fg:cyan noinherit"),
+                ("pointer", "fg:cyan noinherit"),
+            ]
+        ),
+    ).ask()
+    if choice is None:
+        console.print("\n[red]No LLM provider selected. Exiting...[/red]")
+        exit(1)
+    return choice
+
+
+def select_checkpoint_enabled() -> bool:
+    return bool(
+        questionary.confirm(
+            "Enable checkpoint resume for failed runs?",
+            default=False,
+            style=questionary.Style([("question", "fg:cyan")]),
+        ).ask()
+    )
+
+
+def get_output_language() -> str:
+    language = questionary.text(
+        "Output language:",
+        default="English",
+        style=questionary.Style([("text", "fg:green"), ("highlighted", "noinherit")]),
+    ).ask()
+    return (language or "English").strip()
+
+
+def ask_gemini_thinking_config() -> str:
+    choice = questionary.select(
+        "Gemini thinking mode:",
+        choices=[
+            questionary.Choice("Provider default", ""),
+            questionary.Choice("High thinking", "high"),
+            questionary.Choice("Minimal / disabled", "minimal"),
+        ],
+        style=questionary.Style([("selected", "fg:cyan noinherit"), ("highlighted", "fg:cyan noinherit")]),
+    ).ask()
+    return choice or ""
+
+
+def ask_anthropic_effort() -> str:
+    choice = questionary.select(
+        "Claude effort:",
+        choices=[
+            questionary.Choice("Provider default", ""),
+            questionary.Choice("High", "high"),
+            questionary.Choice("Medium", "medium"),
+            questionary.Choice("Low", "low"),
+        ],
+        style=questionary.Style([("selected", "fg:cyan noinherit"), ("highlighted", "fg:cyan noinherit")]),
+    ).ask()
+    return choice or ""
+
+
+def get_backend_url() -> str:
+    url = questionary.text(
+        "Optional backend URL (leave blank for provider default):",
+        default="",
+        style=questionary.Style([("text", "fg:green"), ("highlighted", "noinherit")]),
+    ).ask()
+    return (url or "").strip()
+
+
+def _prompt_custom_model_id(provider: str, mode: str) -> str:
+    provider_key = (provider or "").lower()
+    label = "deployment name" if provider_key == "azure" else "model ID"
+    model = questionary.text(
+        f"Enter {provider_key or 'provider'} {mode}-thinking {label}:",
+        validate=lambda x: len(x.strip()) > 0 or f"Please enter a {label}.",
+        style=questionary.Style([("text", "fg:green"), ("highlighted", "noinherit")]),
+    ).ask()
+    if not model:
+        console.print(f"\n[red]No {label} provided. Exiting...[/red]")
+        exit(1)
+    return model.strip()
+
+
+def select_shallow_thinking_agent(provider: str = "openai") -> str:
     """Select shallow thinking llm engine using an interactive selection."""
 
-    # Define shallow thinking llm engine options with their corresponding model names
     SHALLOW_AGENT_OPTIONS = [
-        ("GPT-5.2-pro - Pro model with response storage for fine-tuning", "gpt-5.2-pro"),
-        ("GPT-5.2 - Latest model with balanced effort and verbosity", "gpt-5.2"),
-        ("GPT-5-nano - Ultra-efficient model for lightweight tasks", "gpt-5-nano"),
-        ("GPT-5-mini - Streamlined model balancing speed and capability", "gpt-5-mini"),
-        ("GPT-4.1 - Proven flagship model for complex operations", "gpt-4.1"),
-        ("GPT-4.1-mini - Compact variant with strong performance", "gpt-4.1-mini"),
-        ("GPT-4.1-nano - Minimalist model for basic automation", "gpt-4.1-nano"),
-        ("GPT-4o - Versatile model for general-purpose reasoning", "gpt-4o"),
-        ("GPT-4o-mini - Optimized for speed and efficiency in simple tasks", "gpt-4o-mini"),
+        (option["label"], option["value"])
+        for option in get_model_options_for_provider(provider, "quick")
     ]
 
     choice = questionary.select(
@@ -160,27 +249,18 @@ def select_shallow_thinking_agent() -> str:
         )
         exit(1)
 
+    if choice == "custom":
+        return _prompt_custom_model_id(provider, "quick")
+
     return choice
 
 
-def select_deep_thinking_agent() -> str:
+def select_deep_thinking_agent(provider: str = "openai") -> str:
     """Select deep thinking llm engine using an interactive selection."""
 
-    # Define deep thinking llm engine options with their corresponding model names
     DEEP_AGENT_OPTIONS = [
-        ("GPT-5.2-pro - Pro model with response storage for fine-tuning", "gpt-5.2-pro"),
-        ("GPT-5.2 - Latest model with balanced effort and verbosity", "gpt-5.2"),
-        ("GPT-5 - Next-gen flagship model for high-complexity tasks", "gpt-5"),
-        ("GPT-5-mini - Streamlined model balancing speed and capability", "gpt-5-mini"),
-        ("GPT-5-nano - Ultra-efficient model for lightweight tasks", "gpt-5-nano"),
-        ("GPT-4.1 - Proven flagship model for complex operations", "gpt-4.1"),
-        ("GPT-4.1-mini - Compact variant with strong performance", "gpt-4.1-mini"),
-        ("GPT-4.1-nano - Minimalist model for basic automation", "gpt-4.1-nano"),
-        ("GPT-4o - Versatile model for general-purpose reasoning", "gpt-4o"),
-        ("o4-mini - Lightweight reasoning model optimized for structure", "o4-mini"),
-        ("o3-mini - High-efficiency reasoning model", "o3-mini"),
-        ("o3 - Full-capability advanced reasoning model", "o3"),
-        ("o1 - Top-tier expert model for problem-solving", "o1"),
+        (option["label"], option["value"])
+        for option in get_model_options_for_provider(provider, "deep")
     ]
 
     choice = questionary.select(
@@ -202,5 +282,8 @@ def select_deep_thinking_agent() -> str:
     if choice is None:
         console.print("\n[red]No deep thinking llm engine selected. Exiting...[/red]")
         exit(1)
+
+    if choice == "custom":
+        return _prompt_custom_model_id(provider, "deep")
 
     return choice

@@ -119,6 +119,48 @@ def get_search_terms(ticker: str) -> List[str]:
     return list(_SEARCH_TERMS_CACHE[normalized])
 
 
+def _term_to_pattern(term: str) -> str:
+    escaped = re.escape(term.strip().lower())
+    if not escaped:
+        return ""
+    return rf"(?<!\w){escaped}(?!\w)"
+
+
+def _matches_term(text: str, term: str) -> bool:
+    if not term:
+        return False
+    pattern = _term_to_pattern(term)
+    if not pattern:
+        return False
+    return re.search(pattern, text, re.IGNORECASE) is not None
+
+
+def _is_short_ticker_term(term: str) -> bool:
+    cleaned = re.sub(r"[^A-Za-z0-9]", "", term or "")
+    return len(cleaned) <= 2 and not (term or "").strip().startswith("$")
+
+
+def _post_relevant_to_company(title: str, content: str, search_terms: List[str]) -> bool:
+    if not search_terms:
+        return True
+
+    haystack = f"{title or ''}\n{content or ''}".lower()
+    strong_terms = [term for term in search_terms if not _is_short_ticker_term(term)]
+    weak_terms = [term for term in search_terms if _is_short_ticker_term(term)]
+
+    # Prefer company-name / cashtag / non-ambiguous terms first.
+    for term in strong_terms:
+        if _matches_term(haystack, term):
+            return True
+
+    # Only fall back to weak terms (e.g. very short tickers) if cashtag-style.
+    for term in weak_terms:
+        if str(term).startswith("$") and _matches_term(haystack, term):
+            return True
+
+    return False
+
+
 def fetch_top_from_category(
     category: Annotated[
         str, "Category to fetch top post from. Collection of subreddits."
@@ -172,19 +214,11 @@ def fetch_top_from_category(
 
                 # if is company_news, check that the title or the content has the company's name (query) mentioned
                 if "company" in category and query:
-                    found = False
-                    for term in (search_terms or []):
-                        # Only search if we have a valid term
-                        if term and isinstance(term, str):
-                            if re.search(
-                                re.escape(term), parsed_line["title"], re.IGNORECASE
-                            ) or re.search(
-                                re.escape(term), parsed_line["selftext"], re.IGNORECASE
-                            ):
-                                found = True
-                                break
-
-                    if not found:
+                    if not _post_relevant_to_company(
+                        parsed_line.get("title", ""),
+                        parsed_line.get("selftext", ""),
+                        search_terms or [],
+                    ):
                         continue
 
                 post = {
@@ -234,7 +268,13 @@ def fetch_top_from_category_online(
     search_terms = None
     if "company" in category and query:
         search_terms = [term for term in get_search_terms(query) if term]
-        search_query = " OR ".join(search_terms[:12]) if search_terms else query
+        # Prefer longer company-name aliases first; short tickers are too noisy on Reddit.
+        ranked_terms = sorted(
+            search_terms,
+            key=lambda term: len(re.sub(r"[^A-Za-z0-9]", "", term)),
+            reverse=True,
+        )
+        search_query = " OR ".join(ranked_terms[:10]) if ranked_terms else query
     else:
         search_query = "market OR economy OR inflation OR central bank"
 
@@ -276,8 +316,9 @@ def fetch_top_from_category_online(
 
             title = data.get("title", "")
             content = data.get("selftext", "")
-            # For online path, rely on Reddit search API filtering; avoid over-filtering
-            # by local regex that can drop valid posts with sparse selftext.
+            if "company" in category and query:
+                if not _post_relevant_to_company(title, content, search_terms or []):
+                    continue
 
             url_value = data.get("url") or ""
             if not url_value and data.get("permalink"):

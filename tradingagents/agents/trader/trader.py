@@ -1,11 +1,20 @@
 import functools
 import time
 import json
-from ..utils.agent_trading_modes import get_trading_mode_context, get_agent_specific_context, extract_recommendation, format_final_decision
+from langchain_core.messages import AIMessage
+from ..schemas import TraderProposal, render_trader_proposal
+from ..utils.agent_trading_modes import (
+    ensure_final_transaction_proposal,
+    extract_recommendation,
+    get_agent_specific_context,
+    get_trading_mode_context,
+)
+from ..utils.memory import TradingMemoryLog
 from ..utils.report_context import (
     get_agent_context_bundle,
     build_debate_digest,
 )
+from ..utils.structured import bind_structured, invoke_structured_or_freetext
 from tradingagents.dataflows.alpaca_utils import AlpacaUtils
 
 # Import prompt capture utility
@@ -18,6 +27,9 @@ except ImportError:
 
 
 def create_trader(llm, memory, config=None):
+    structured_llm = bind_structured(llm, TraderProposal, "Trader")
+    decision_log = TradingMemoryLog(config)
+
     def trader_node(state, name):
         company_name = state["company_of_interest"]
         investment_plan = state["investment_plan"]
@@ -86,6 +98,7 @@ def create_trader(llm, memory, config=None):
         mode_name = trading_context["mode_name"]
         decision_format = trading_context["decision_format"]
         final_format = trading_context["final_format"]
+        output_language = (config or {}).get("output_language", "English")
 
         context_bundle = get_agent_context_bundle(
             state,
@@ -106,6 +119,7 @@ def create_trader(llm, memory, config=None):
         past_memory_str = ""
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
+        decision_memory_str = decision_log.get_past_context(company_name)
 
         # Use centralized trading mode context for trader-specific instructions
         trader_context = f"""
@@ -163,6 +177,7 @@ Your {decision_format} should be based on:
 Always conclude with: {final_format}
 
 **CRITICAL:** Focus on swing trading setups, not intraday scalping or long-term investments.
+Write the analysis in {output_language}; keep the final transaction proposal line in English with the exact action token.
 
 **ANALYSIS REQUIREMENT:** Provide comprehensive swing trading analysis including:
 1. **Multi-Timeframe Setup** - 1h/4h/1d alignment, trend structure, key levels
@@ -226,6 +241,10 @@ Do not forget to utilize lessons from past decisions to learn from your mistakes
             },
             context,
         ]
+        messages[0]["content"] += (
+            "\n\nPersistent decision log lessons for this symbol and recent cross-ticker "
+            f"setups:\n{decision_memory_str}"
+        )
 
         # Capture the COMPLETE prompt that gets sent to the LLM
         try:
@@ -244,11 +263,15 @@ USER MESSAGE:
             # Fallback to system message only
             capture_agent_prompt("trader_investment_plan", messages[0]["content"], company_name)
 
-        result = llm.invoke(messages)
+        analysis_content = invoke_structured_or_freetext(
+            structured_llm,
+            llm,
+            messages,
+            render_trader_proposal,
+            "Trader",
+        )
 
         # Enhanced validation and final proposal handling
-        analysis_content = result.content if hasattr(result, 'content') else str(result)
-        
         # Check if we have substantial analysis content
         if len(analysis_content.strip()) < 200 or ("FINAL TRANSACTION PROPOSAL:" in analysis_content and len(analysis_content.replace("FINAL TRANSACTION PROPOSAL:", "").strip()) < 150):
             # Generate fallback comprehensive analysis
@@ -265,8 +288,13 @@ Include detailed reasoning for swing trading decisions and conclude with a clear
 
 Focus on actionable insights with specific price levels and risk parameters. Keep response under 360 words."""
             
-            fallback_result = llm.invoke(fallback_prompt)
-            analysis_content = fallback_result.content if hasattr(fallback_result, 'content') else str(fallback_result)
+            analysis_content = invoke_structured_or_freetext(
+                structured_llm,
+                llm,
+                fallback_prompt,
+                render_trader_proposal,
+                "Trader",
+            )
         
         # Ensure we have a final recommendation
         if "FINAL TRANSACTION PROPOSAL:" not in analysis_content:
@@ -276,26 +304,32 @@ Focus on actionable insights with specific price levels and risk parameters. Kee
 Analysis:
 {analysis_content}
 
-Provide a brief justification (max 4 bullets) and conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**"""
+Provide a brief justification (max 4 bullets) and conclude with: {final_format}"""
             
-            final_result = llm.invoke(final_prompt)
-            final_content = final_result.content if hasattr(final_result, 'content') else str(final_result)
+            final_content = invoke_structured_or_freetext(
+                structured_llm,
+                llm,
+                final_prompt,
+                render_trader_proposal,
+                "Trader",
+            )
             
             # Properly combine analysis with final proposal
             combined_content = analysis_content + "\n\n---\n\n## Final Trading Decision\n\n" + final_content
-            result = type(result)(content=combined_content)
-        else:
-            # Analysis already contains final proposal
-            result = type(result)(content=analysis_content)
+            analysis_content = combined_content
+
+        result = AIMessage(content=analysis_content)
 
         # Extract the recommendation from the response
         trading_mode = trading_context["mode"]
         extracted_recommendation = extract_recommendation(result.content, trading_mode)
+        if not extracted_recommendation:
+            extracted_recommendation = "NEUTRAL" if trading_mode == "trading" else "HOLD"
         
-        # Format the final decision if extraction was successful
-        final_decision_content = result.content
-        if extracted_recommendation:
-            final_decision_content = format_final_decision(extracted_recommendation, trading_mode)
+        final_decision_content = ensure_final_transaction_proposal(
+            result.content, extracted_recommendation, trading_mode
+        )
+        result = AIMessage(content=final_decision_content)
 
         return {
             "messages": [result],

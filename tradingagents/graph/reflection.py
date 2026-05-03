@@ -119,3 +119,26 @@ Adhere strictly to these instructions, and ensure your output is detailed, accur
             "RISK JUDGE", judge_decision, situation, returns_losses
         )
         risk_manager_memory.add_situations([(situation, result)])
+
+    def reflect_on_final_decision(
+        self,
+        final_decision: str,
+        raw_return: float,
+        alpha_return: float | None,
+    ) -> str:
+        """Create a compact memory-log reflection for a completed final decision."""
+        alpha_text = f"{alpha_return:+.1%}" if alpha_return is not None else "n/a"
+        messages = [
+            (
+                "system",
+                "You are reviewing a past trading decision after the outcome is known. "
+                "Write exactly 2-4 concise sentences: whether the direction worked, "
+                "what thesis held or failed, and one lesson for the next similar trade.",
+            ),
+            (
+                "human",
+                f"Raw return: {raw_return:+.1%}\nAlpha/benchmark return: {alpha_text}\n\nFinal decision:\n{final_decision}",
+            ),
+        ]
+        result = self.quick_thinking_llm.invoke(messages)
+        return result.content if hasattr(result, "content") else str(result)

@@ -2,16 +2,19 @@
 
 import os
 import pandas as pd
+import time
 from datetime import datetime, timedelta
-from typing import Annotated, Union, Optional, List
+from typing import Annotated, Union, Optional, List, Dict, Any
 from alpaca.data.historical import StockHistoricalDataClient, CryptoHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest, CryptoBarsRequest, StockLatestQuoteRequest, CryptoLatestQuoteRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from alpaca.data.enums import DataFeed
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import GetAssetsRequest, GetOrdersRequest, MarketOrderRequest, ClosePositionRequest
-from alpaca.trading.enums import AssetClass, OrderSide, TimeInForce
-from .config import get_api_key, get_alpaca_use_paper
+from alpaca.trading.enums import AssetClass, AssetStatus, OrderSide, QueryOrderStatus, TimeInForce
+from alpaca.common.enums import Sort
+from .config import get_api_key, get_alpaca_use_paper, get_config
+from .ticker_utils import TickerUtils
 
 
 # Fallback dictionary for company names
@@ -56,6 +59,91 @@ ticker_to_company_fallback = {
     "ROKU": "Roku",
     "PINS": "Pinterest",
 }
+
+
+_ASSET_SEARCH_CACHE = {
+    "expires_at": 0.0,
+    "assets": [],
+}
+
+
+def _enum_value(value) -> str:
+    return getattr(value, "value", value) or ""
+
+
+def _normalize_crypto_symbol(symbol: str) -> str:
+    raw = (symbol or "").upper().replace("-", "/")
+    if "/" in raw:
+        return raw
+    for quote in ("USDT", "USDC", "USD"):
+        if raw.endswith(quote) and len(raw) > len(quote):
+            return f"{raw[:-len(quote)]}/{quote}"
+    return raw
+
+
+def _normalize_asset_symbol(symbol: str, asset_class: str) -> str:
+    raw = (symbol or "").upper()
+    if asset_class == AssetClass.CRYPTO.value:
+        return _normalize_crypto_symbol(raw)
+    return raw
+
+
+def _asset_to_search_result(asset) -> Dict[str, Any]:
+    asset_class = _enum_value(getattr(asset, "asset_class", "")) or "unknown"
+    symbol = _normalize_asset_symbol(getattr(asset, "symbol", ""), asset_class)
+    name = getattr(asset, "name", "") or ticker_to_company_fallback.get(symbol, symbol)
+    exchange = _enum_value(getattr(asset, "exchange", "")) or ""
+    tradable = bool(getattr(asset, "tradable", False))
+    asset_type = "Crypto" if asset_class == AssetClass.CRYPTO.value else "Equity"
+    return {
+        "symbol": symbol,
+        "name": name,
+        "asset_class": asset_class,
+        "asset_type": asset_type,
+        "exchange": exchange,
+        "tradable": tradable,
+        "market_cap": None,
+    }
+
+
+def _fallback_asset_results() -> List[Dict[str, Any]]:
+    stocks = [
+        ("NVDA", "NVIDIA Corporation", "NASDAQ"),
+        ("AMD", "Advanced Micro Devices, Inc.", "NASDAQ"),
+        ("TSLA", "Tesla, Inc.", "NASDAQ"),
+        ("AAPL", "Apple Inc.", "NASDAQ"),
+        ("MSFT", "Microsoft Corporation", "NASDAQ"),
+    ]
+    crypto = [
+        ("BTC/USD", "Bitcoin / US Dollar"),
+        ("ETH/USD", "Ethereum / US Dollar"),
+        ("SOL/USD", "Solana / US Dollar"),
+    ]
+    results = [
+        {
+            "symbol": symbol,
+            "name": name,
+            "asset_class": AssetClass.US_EQUITY.value,
+            "asset_type": "Equity",
+            "exchange": exchange,
+            "tradable": True,
+            "market_cap": None,
+        }
+        for symbol, name, exchange in stocks
+    ]
+    results.extend(
+        {
+            "symbol": symbol,
+            "name": name,
+            "asset_class": AssetClass.CRYPTO.value,
+            "asset_type": "Crypto",
+            "exchange": "Alpaca Crypto",
+            "tradable": True,
+            "market_cap": None,
+        }
+        for symbol, name in crypto
+    )
+    return results
 
 
 def get_alpaca_stock_client() -> StockHistoricalDataClient:
@@ -130,7 +218,157 @@ def _parse_timeframe(tf: Union[str, TimeFrame]) -> TimeFrame:
     return result
 
 
+def _is_supported_data_fallback_error(error: Exception) -> bool:
+    text = str(error).lower()
+    return any(
+        marker in text
+        for marker in (
+            "subscription",
+            "permission",
+            "unauthorized",
+            "forbidden",
+            "not found",
+            "empty",
+            "rate limit",
+            "too many requests",
+            "timeout",
+            "api key",
+            "secret not found",
+        )
+    )
+
+
+def _yfinance_fallback_data(
+    symbol: str,
+    start: pd.Timestamp,
+    end: Optional[pd.Timestamp],
+    timeframe: Union[str, TimeFrame],
+) -> pd.DataFrame:
+    config = get_config()
+    if not config.get("data_fallback_enabled", False):
+        return pd.DataFrame()
+
+    tf_text = str(timeframe).lower()
+    interval = "1d"
+    if "hour" in tf_text or tf_text in ("1h",):
+        interval = "1h"
+    elif "min" in tf_text:
+        return pd.DataFrame()
+
+    try:
+        import yfinance as yf
+
+        yahoo_symbol = TickerUtils.convert_for_api(symbol, "yahoo")
+        data = yf.download(
+            yahoo_symbol,
+            start=start.strftime("%Y-%m-%d"),
+            end=end.strftime("%Y-%m-%d") if end is not None else None,
+            interval=interval,
+            progress=False,
+            auto_adjust=False,
+            threads=False,
+        )
+    except Exception as exc:
+        print(f"YFinance fallback failed for {symbol}: {exc}")
+        return pd.DataFrame()
+
+    if data is None or data.empty:
+        return pd.DataFrame()
+    if isinstance(data.columns, pd.MultiIndex):
+        data.columns = [col[0] for col in data.columns]
+    rename_map = {
+        "Date": "timestamp",
+        "Datetime": "timestamp",
+        "Open": "open",
+        "High": "high",
+        "Low": "low",
+        "Close": "close",
+        "Volume": "volume",
+    }
+    df = data.reset_index().rename(columns=rename_map)
+    required = ["timestamp", "open", "high", "low", "close", "volume"]
+    missing = [col for col in required if col not in df.columns]
+    if missing:
+        print(f"YFinance fallback returned malformed data for {symbol}: missing {missing}")
+        return pd.DataFrame()
+    return df[required].dropna().reset_index(drop=True)
+
+
 class AlpacaUtils:
+    @staticmethod
+    def _get_searchable_assets(cache_seconds: int = 900) -> List[Dict[str, Any]]:
+        """Return active equity and crypto assets, cached to keep symbol search responsive."""
+        now = time.time()
+        cached_assets = _ASSET_SEARCH_CACHE.get("assets") or []
+        if cached_assets and now < _ASSET_SEARCH_CACHE.get("expires_at", 0):
+            return cached_assets
+
+        try:
+            client = get_alpaca_trading_client()
+            assets = []
+            for asset_class in (AssetClass.US_EQUITY, AssetClass.CRYPTO):
+                request = GetAssetsRequest(status=AssetStatus.ACTIVE, asset_class=asset_class)
+                assets.extend(client.get_all_assets(request))
+
+            searchable_assets = []
+            seen_symbols = set()
+            for asset in assets:
+                result = _asset_to_search_result(asset)
+                symbol = result["symbol"]
+                if not symbol or symbol in seen_symbols:
+                    continue
+                seen_symbols.add(symbol)
+                searchable_assets.append(result)
+
+            _ASSET_SEARCH_CACHE["assets"] = searchable_assets
+            _ASSET_SEARCH_CACHE["expires_at"] = now + cache_seconds
+            return searchable_assets
+        except Exception as e:
+            print(f"Error loading Alpaca assets for search: {e}")
+            fallback = _fallback_asset_results()
+            _ASSET_SEARCH_CACHE["assets"] = fallback
+            _ASSET_SEARCH_CACHE["expires_at"] = now + 60
+            return fallback
+
+    @staticmethod
+    def search_assets(query: str = "", limit: int = 12) -> List[Dict[str, Any]]:
+        """Search active Alpaca equity and crypto assets for the WebUI symbol picker."""
+        query = (query or "").strip().upper()
+        normalized_query = query.replace("/", "").replace("-", "")
+        assets = AlpacaUtils._get_searchable_assets()
+
+        if not normalized_query:
+            default_symbols = ["NVDA", "AMD", "TSLA", "AAPL", "MSFT", "BTC/USD", "ETH/USD", "SOL/USD"]
+            by_symbol = {asset["symbol"]: asset for asset in assets}
+            return [by_symbol.get(symbol) or asset for symbol in default_symbols for asset in _fallback_asset_results() if asset["symbol"] == symbol][:limit]
+
+        matches = []
+        for asset in assets:
+            symbol = asset["symbol"]
+            symbol_key = symbol.replace("/", "")
+            crypto_base = symbol.split("/", 1)[0] if asset.get("asset_class") == AssetClass.CRYPTO.value else ""
+            crypto_quote = symbol.split("/", 1)[1] if "/" in symbol else ""
+            name = (asset.get("name") or "").upper()
+            if crypto_base and normalized_query == crypto_base:
+                quote_priority = {"USD": 0, "USDC": 0.1, "USDT": 0.2}.get(crypto_quote, 0.4)
+                score = -1 + quote_priority
+            elif normalized_query == symbol_key:
+                score = 0
+            elif symbol_key.startswith(normalized_query):
+                score = 1
+            elif name.startswith(query):
+                score = 2
+            elif normalized_query in symbol_key or query in name:
+                score = 3
+            else:
+                continue
+
+            tradable_penalty = 0 if asset.get("tradable") else 1
+            crypto_bonus = 0 if asset.get("asset_class") != AssetClass.CRYPTO.value else -0.1
+            matches.append((score + tradable_penalty + crypto_bonus, symbol, asset))
+
+        matches.sort(key=lambda item: (item[0], item[1]))
+        return [asset for _, _, asset in matches[:limit]]
 
     @staticmethod
     def get_stock_data(
@@ -161,29 +399,28 @@ class AlpacaUtils:
 
         tf = _parse_timeframe(timeframe)
 
-        # choose client
-        is_crypto = "/" in symbol
-        client = get_alpaca_crypto_client() if is_crypto else get_alpaca_stock_client()
-
-        # build request params; always use a list for symbol_or_symbols
-        params = (
-            CryptoBarsRequest(
-                symbol_or_symbols=[symbol],
-                timeframe=tf,
-                start=start,
-                end=end,
-                feed=feed
-            ) if is_crypto else
-            StockBarsRequest(
-                symbol_or_symbols=[symbol],
-                timeframe=tf,
-                start=start,
-                end=end,
-                feed=feed
-            )
-        )
-
         try:
+            # choose client
+            is_crypto = "/" in symbol
+            client = get_alpaca_crypto_client() if is_crypto else get_alpaca_stock_client()
+
+            # build request params; always use a list for symbol_or_symbols
+            params = (
+                CryptoBarsRequest(
+                    symbol_or_symbols=[symbol],
+                    timeframe=tf,
+                    start=start,
+                    end=end,
+                    feed=feed
+                ) if is_crypto else
+                StockBarsRequest(
+                    symbol_or_symbols=[symbol],
+                    timeframe=tf,
+                    start=start,
+                    end=end,
+                    feed=feed
+                )
+            )
             bars = client.get_crypto_bars(params) if is_crypto else client.get_stock_bars(params)
             # convert to DataFrame via the .df property
             df = bars.df.reset_index()  # multi-index ['symbol','timestamp']
@@ -195,11 +432,20 @@ class AlpacaUtils:
                 # If no symbol column, assume all data is for the requested symbol
                 pass
                 
+            if df.empty:
+                raise ValueError("empty Alpaca bar response")
+
             if save_path:
-                df.to_csv(save_path, index=False)
+                df.to_csv(save_path, index=False, encoding="utf-8")
             return df
 
         except Exception as e:
+            if _is_supported_data_fallback_error(e):
+                fallback_df = _yfinance_fallback_data(symbol, start, end, timeframe)
+                if not fallback_df.empty:
+                    if save_path:
+                        fallback_df.to_csv(save_path, index=False, encoding="utf-8")
+                    return fallback_df
             print(f"Error fetching data for {symbol}: {e}")
             return pd.DataFrame()
 
@@ -335,13 +581,22 @@ class AlpacaUtils:
     @staticmethod
     def get_recent_orders(page=1, page_size=7):
         """Get recent orders from Alpaca account, with simple pagination."""
+        return AlpacaUtils.get_recent_orders_page(page=page, page_size=page_size).get("orders", [])
+
+    @staticmethod
+    def get_recent_orders_page(page=1, page_size=5, max_orders=500):
+        """Get recent Alpaca orders and pagination metadata for the WebUI."""
         try:
             client = get_alpaca_trading_client()
-            req = GetOrdersRequest(status="all", limit=page_size * page, nested=False)
+            req = GetOrdersRequest(
+                status=QueryOrderStatus.ALL,
+                limit=max_orders,
+                direction=Sort.DESC,
+                nested=False,
+            )
             orders_page = client.get_orders(req)
             orders = list(orders_page)
 
-            # Convert orders to a list of dictionaries
             orders_data = []
             for order in orders:
                 qty = float(order.qty) if order.qty is not None else 0.0
@@ -359,13 +614,29 @@ class AlpacaUtils:
                     "Source": order.client_order_id
                 })
 
-            # Now slice out the exact page we want (newest first)
+            total_orders = len(orders_data)
+            total_pages = max(1, (total_orders + page_size - 1) // page_size)
+            page = max(1, min(int(page or 1), total_pages))
             start = (page - 1) * page_size
-            return orders_data[start : start + page_size]
+            return {
+                "orders": orders_data[start : start + page_size],
+                "page": page,
+                "page_size": page_size,
+                "total_orders": total_orders,
+                "total_pages": total_pages,
+                "has_more": total_orders >= max_orders,
+            }
 
         except Exception as e:
             print(f"Error fetching orders: {e}")
-            return []
+            return {
+                "orders": [],
+                "page": max(1, int(page or 1)),
+                "page_size": page_size,
+                "total_orders": 0,
+                "total_pages": 1,
+                "has_more": False,
+            }
 
     @staticmethod
     def get_account_info():

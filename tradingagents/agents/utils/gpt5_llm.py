@@ -1,11 +1,6 @@
-"""
-Custom LLM wrapper for GPT-5 models that use the responses.create() API.
+"""Custom LangChain wrapper for OpenAI reasoning models using Responses API."""
 
-GPT-5 models (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5.2, gpt-5.2-pro) require the new
-responses.create() API instead of chat.completions.create().
-"""
-
-from typing import Any, Dict, List, Optional, Iterator, Tuple
+from typing import Any, Dict, List, Optional
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.outputs import ChatResult, ChatGeneration
@@ -14,84 +9,26 @@ from openai import OpenAI
 import json
 import time
 
+from tradingagents.openai_model_registry import (
+    apply_responses_model_params,
+    describe_model_params as describe_registry_model_params,
+    get_default_model_params,
+    is_responses_model,
+    normalize_model_params,
+)
 
-# ============================================================================
-# Research Depth to Model Parameters Mapping
-# ============================================================================
 
 def get_model_params_for_depth(
     model_name: str,
     research_depth: str,
     model_role: str = "quick"
 ) -> Dict[str, Any]:
+    """Backward-compatible shim.
+
+    Research depth now controls debate rounds only. Model parameters come from
+    per-model defaults or explicit UI overrides.
     """
-    Map research depth and model role to appropriate model parameters.
-    
-    Args:
-        model_name: The LLM model name (e.g., "gpt-5-mini", "gpt-4o")
-        research_depth: UI setting - "Shallow", "Medium", or "Deep"
-        model_role: "quick" for Quick Thinker, "deep" for Deep Thinker
-    
-    Returns:
-        Dict with appropriate model parameters (reasoning_effort, verbosity, temperature)
-    
-    Research Depth Strategy:
-    
-    | Depth    | Quick Thinker (speed-focused)  | Deep Thinker (quality-focused) |
-    |----------|-------------------------------|-------------------------------|
-    | Shallow  | effort: low, verbosity: low   | effort: medium, verbosity: medium |
-    | Medium   | effort: medium, verbosity: medium | effort: high, verbosity: high |
-    | Deep     | effort: high, verbosity: high | effort: xhigh, verbosity: high |
-    """
-    params = {}
-    depth = research_depth.lower() if research_depth else "medium"
-    role = model_role.lower() if model_role else "quick"
-    
-    # Check if it's a GPT-5 model
-    if is_gpt5_model(model_name):
-        # GPT-5 models use reasoning_effort and verbosity
-        if role == "quick":
-            # Quick thinker: prioritize speed, lower effort
-            depth_mapping = {
-                "shallow": {"reasoning_effort": "low", "verbosity": "low"},
-                "medium": {"reasoning_effort": "medium", "verbosity": "medium"},
-                "deep": {"reasoning_effort": "high", "verbosity": "high"},
-            }
-        else:  # deep thinker
-            # Deep thinker: prioritize quality, higher effort
-            depth_mapping = {
-                "shallow": {"reasoning_effort": "medium", "verbosity": "medium"},
-                "medium": {"reasoning_effort": "high", "verbosity": "high"},
-                "deep": {"reasoning_effort": "xhigh", "verbosity": "high"},
-            }
-        
-        mapping = depth_mapping.get(depth, depth_mapping["medium"])
-        params["reasoning_effort"] = mapping["reasoning_effort"]
-        params["verbosity"] = mapping["verbosity"]
-        
-    else:
-        # Non-GPT-5 models (gpt-4o, gpt-4.1, o3, etc.) use temperature
-        if role == "quick":
-            # Quick thinker: more deterministic for speed
-            temp_mapping = {
-                "shallow": 0.1,
-                "medium": 0.2,
-                "deep": 0.3,
-            }
-        else:  # deep thinker
-            # Deep thinker: slightly more creative for better analysis
-            temp_mapping = {
-                "shallow": 0.2,
-                "medium": 0.3,
-                "deep": 0.4,
-            }
-        
-        # Only add temperature for models that support it
-        no_temp_models = ["o3", "o3-mini", "o4-mini", "o1", "o1-mini", "o1-preview"]
-        if not any(m in model_name for m in no_temp_models):
-            params["temperature"] = temp_mapping.get(depth, 0.2)
-    
-    return params
+    return get_default_model_params(model_name, model_role)
 
 
 def describe_model_params(
@@ -99,54 +36,22 @@ def describe_model_params(
     research_depth: str,
     model_role: str = "quick"
 ) -> str:
-    """Get a human-readable description of the model parameters being used."""
-    params = get_model_params_for_depth(model_name, research_depth, model_role)
-    
-    if is_gpt5_model(model_name):
-        return f"effort={params.get('reasoning_effort', 'medium')}, verbosity={params.get('verbosity', 'medium')}"
-    else:
-        temp = params.get('temperature')
-        if temp:
-            return f"temperature={temp}"
-        return "default params"
+    """Backward-compatible description helper."""
+    return describe_registry_model_params(model_name, None, model_role)
 
 
 class GPT5ChatModel(BaseChatModel):
-    """Custom ChatModel wrapper for GPT-5 models using responses.create() API.
-    
-    Supported models and their parameters:
-    
-    gpt-5.2:
-        - reasoning.effort: none, low, medium, high, xhigh
-        - text.verbosity: low, medium, high
-        - summary: concise, detailed, auto, null
-    
-    gpt-5.2-pro:
-        - No reasoning effort
-        - summary: concise, detailed, auto, null
-    
-    gpt-5:
-        - reasoning.effort: minimal, low, medium, high
-        - text.verbosity: low, medium, high
-        - summary: concise, detailed, auto, null
-    
-    gpt-5.1:
-        - reasoning.effort: none, low, medium, high
-        - text.verbosity: low, medium, high
-        - summary: concise, detailed, auto, null
-    
-    gpt-5-mini / gpt-5-nano:
-        - reasoning.effort: minimal, low, medium, high
-        - text.verbosity: low, medium, high
-        - summary: concise, detailed, auto, null
-    """
+    """ChatModel wrapper for OpenAI reasoning models using responses.create()."""
     
     model: str = "gpt-5-mini"
     api_key: Optional[str] = None
     base_url: Optional[str] = None
-    reasoning_effort: str = "medium"  # Will be mapped to model-specific values
+    reasoning_effort: str = "medium"
     verbosity: str = "medium"  # low, medium, high
-    summary: str = "auto"  # concise, detailed, auto, null
+    summary: str = "auto"  # concise, detailed, auto, none
+    max_output_tokens: Optional[int] = None
+    store: bool = False
+    parallel_tool_calls: bool = True
     
     # Internal client - not a pydantic field
     _client: Optional[OpenAI] = None
@@ -164,76 +69,9 @@ class GPT5ChatModel(BaseChatModel):
             client_kwargs["base_url"] = self.base_url
         self._client = OpenAI(**client_kwargs) if client_kwargs else OpenAI()
     
-    def _get_model_type(self) -> str:
-        """Determine the model type for parameter mapping."""
-        if "gpt-5.2-pro" in self.model:
-            return "gpt-5.2-pro"
-        elif "gpt-5.2" in self.model:
-            return "gpt-5.2"
-        elif "gpt-5.1" in self.model:
-            return "gpt-5.1"
-        elif "gpt-5-mini" in self.model or "gpt-5-nano" in self.model:
-            return "gpt-5-mini"  # Same params for mini and nano
-        elif "gpt-5" in self.model:
-            return "gpt-5"
-        else:
-            return "gpt-5-mini"  # Default
-    
-    def _map_reasoning_effort(self) -> Optional[str]:
-        """Map reasoning effort to model-specific values."""
-        model_type = self._get_model_type()
-        effort = self.reasoning_effort.lower()
-        
-        # gpt-5.2-pro doesn't have reasoning effort
-        if model_type == "gpt-5.2-pro":
-            return None
-        
-        # Map common values to model-specific values
-        effort_mapping = {
-            "gpt-5.2": {
-                # gpt-5.2 uses: none, low, medium, high, xhigh
-                "minimal": "low",
-                "none": "none",
-                "low": "low",
-                "medium": "medium",
-                "high": "high",
-                "xhigh": "xhigh",
-            },
-            "gpt-5.1": {
-                # gpt-5.1 uses: none, low, medium, high
-                "minimal": "low",
-                "none": "none",
-                "low": "low",
-                "medium": "medium",
-                "high": "high",
-                "xhigh": "high",
-            },
-            "gpt-5": {
-                # gpt-5 uses: minimal, low, medium, high
-                "none": "minimal",
-                "minimal": "minimal",
-                "low": "low",
-                "medium": "medium",
-                "high": "high",
-                "xhigh": "high",
-            },
-            "gpt-5-mini": {
-                # gpt-5-mini/nano uses: minimal, low, medium, high
-                "none": "minimal",
-                "minimal": "minimal",
-                "low": "low",
-                "medium": "medium",
-                "high": "high",
-                "xhigh": "high",
-            },
-        }
-        
-        model_mapping = effort_mapping.get(model_type, effort_mapping["gpt-5-mini"])
-        return model_mapping.get(effort, "medium")
-    
     @property
     def _llm_type(self) -> str:
-        return "gpt5-chat"
+        return "openai-responses-chat"
     
     @property
     def _identifying_params(self) -> Dict[str, Any]:
@@ -241,6 +79,10 @@ class GPT5ChatModel(BaseChatModel):
             "model": self.model,
             "reasoning_effort": self.reasoning_effort,
             "verbosity": self.verbosity,
+            "summary": self.summary,
+            "max_output_tokens": self.max_output_tokens,
+            "store": self.store,
+            "parallel_tool_calls": self.parallel_tool_calls,
         }
     
     def _convert_messages_to_input(self, messages: List[BaseMessage]) -> List[Dict]:
@@ -425,10 +267,6 @@ class GPT5ChatModel(BaseChatModel):
                 "content": [{"type": "input_text", "text": str(messages)}]
             }]
         
-        # Determine model type and parameters
-        model_type = self._get_model_type()
-        reasoning_effort = self._map_reasoning_effort()
-        
         # Build base API parameters
         api_params = {
             "model": self.model,
@@ -436,44 +274,28 @@ class GPT5ChatModel(BaseChatModel):
             "text": {
                 "format": {"type": "text"}
             },
-            "store": True,
         }
-        
-        # Add model-specific parameters based on model type
-        if model_type == "gpt-5.2-pro":
-            # gpt-5.2-pro: No reasoning effort, just summary
-            if self.summary and self.summary != "null":
-                api_params["summary"] = self.summary
-                
-        elif model_type == "gpt-5.2":
-            # gpt-5.2: reasoning.effort (none/low/medium/high/xhigh), verbosity, summary
-            if reasoning_effort:
-                api_params["reasoning"] = {"effort": reasoning_effort}
-            else:
-                 api_params["reasoning"] = {}
 
-            api_params["text"]["verbosity"] = self.verbosity
-            if self.summary and self.summary != "null":
-                api_params["reasoning"]["summary"] = self.summary
-                
-        elif model_type == "gpt-5.1":
-            # gpt-5.1: reasoning.effort (none/low/medium/high), verbosity, summary
-            if reasoning_effort:
-                api_params["reasoning"] = {"effort": reasoning_effort}
-            api_params["text"]["verbosity"] = self.verbosity
-            if self.summary and self.summary != "null":
-                api_params["reasoning"]["summary"] = self.summary
-                
-        else:
-            # gpt-5, gpt-5-mini, gpt-5-nano: reasoning.effort (minimal/low/medium/high), verbosity, summary
-            api_params["reasoning"] = {}
-            if reasoning_effort:
-                api_params["reasoning"]["effort"] = reasoning_effort
-            if self.summary and self.summary != "null":
-                api_params["reasoning"]["summary"] = self.summary
-            api_params["text"]["verbosity"] = self.verbosity
-        
-        print(f"[GPT5] Model: {self.model} (type: {model_type}), effort: {reasoning_effort}, verbosity: {self.verbosity}")
+        runtime_params = normalize_model_params(
+            self.model,
+            {
+                "reasoning_effort": self.reasoning_effort,
+                "text_verbosity": self.verbosity,
+                "reasoning_summary": self.summary,
+                "max_output_tokens": self.max_output_tokens,
+                "store": self.store,
+                "parallel_tool_calls": self.parallel_tool_calls,
+            },
+            role="deep",
+        )
+        apply_responses_model_params(api_params, self.model, runtime_params, role="deep")
+        reasoning_effort = runtime_params.get("reasoning_effort")
+        runtime_verbosity = runtime_params.get("text_verbosity") or runtime_params.get("verbosity")
+
+        print(
+            f"[OPENAI RESPONSES] Model: {self.model}, "
+            f"{describe_registry_model_params(self.model, runtime_params, role='deep')}"
+        )
         input_chars = len(str(input_messages))
 
         def _extract_usage_dict(resp) -> Dict[str, int]:
@@ -515,7 +337,7 @@ class GPT5ChatModel(BaseChatModel):
                 "input_chars": input_chars,
                 "output_chars": int(output_chars or 0),
                 "effort": reasoning_effort,
-                "verbosity": self.verbosity,
+                "verbosity": runtime_verbosity,
                 "usage": usage or {},
                 "error_message": error_message,
             }
@@ -700,6 +522,9 @@ class GPT5ChatModel(BaseChatModel):
             reasoning_effort=self.reasoning_effort,
             verbosity=self.verbosity,
             summary=self.summary,
+            max_output_tokens=self.max_output_tokens,
+            store=self.store,
+            parallel_tool_calls=self.parallel_tool_calls,
         )
         new_model._bound_tools = tools
         return new_model
@@ -723,32 +548,23 @@ class GPT5ChatModel(BaseChatModel):
 
 
 def is_gpt5_model(model_name: str) -> bool:
-    """Check if a model name is a GPT-5 variant."""
-    gpt5_models = ["gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5.1", "gpt-5.2", "gpt-5.2-pro"]
-    return any(model_prefix in model_name for model_prefix in gpt5_models)
+    """Check if core chat calls should use the Responses API wrapper."""
+    return is_responses_model(model_name)
 
 
 def get_chat_model(model_name: str, api_key: Optional[str] = None, **kwargs):
-    """
-    Factory function to get the appropriate chat model based on model name.
-    
-    Returns GPT5ChatModel for GPT-5 variants, otherwise returns ChatOpenAI.
-    
-    Supported GPT-5 models:
-    - gpt-5, gpt-5-mini, gpt-5-nano: reasoning.effort (minimal/low/medium/high)
-    - gpt-5.1: reasoning.effort (none/low/medium/high)
-    - gpt-5.2: reasoning.effort (none/low/medium/high/xhigh)
-    - gpt-5.2-pro: No reasoning effort, just summary
-    """
+    """Factory function to get the appropriate chat model."""
     base_url = kwargs.pop("base_url", None)
+    model_role = kwargs.pop("model_role", "deep")
 
-    if is_gpt5_model(model_name):
-        reasoning_effort = kwargs.pop("reasoning_effort", "medium")
-        verbosity = kwargs.pop("verbosity", "medium")
-        summary = kwargs.pop("summary", "auto")
-        
-        # Remove temperature if present (GPT-5 doesn't support it)
-        kwargs.pop("temperature", None)
+    if is_responses_model(model_name):
+        params = normalize_model_params(model_name, kwargs, role=model_role)
+        reasoning_effort = params.get("reasoning_effort", "medium")
+        verbosity = params.get("text_verbosity") or params.get("verbosity", "medium")
+        summary = params.get("reasoning_summary") or params.get("summary", "auto")
+        max_output_tokens = params.get("max_output_tokens")
+        store = bool(params.get("store", False))
+        parallel_tool_calls = bool(params.get("parallel_tool_calls", True))
         
         return GPT5ChatModel(
             model=model_name,
@@ -757,9 +573,25 @@ def get_chat_model(model_name: str, api_key: Optional[str] = None, **kwargs):
             reasoning_effort=reasoning_effort,
             verbosity=verbosity,
             summary=summary,
+            max_output_tokens=max_output_tokens,
+            store=store,
+            parallel_tool_calls=parallel_tool_calls,
         )
     else:
         from langchain_openai import ChatOpenAI
+        # Chat Completions uses max_tokens; the UI uses max_output_tokens.
+        if "max_output_tokens" in kwargs and "max_tokens" not in kwargs:
+            kwargs["max_tokens"] = kwargs.pop("max_output_tokens")
+        for unsupported in (
+            "reasoning_effort",
+            "text_verbosity",
+            "verbosity",
+            "reasoning_summary",
+            "summary",
+            "store",
+            "parallel_tool_calls",
+        ):
+            kwargs.pop(unsupported, None)
         chat_kwargs = {"model": model_name, **kwargs}
         if api_key is not None:
             chat_kwargs["openai_api_key"] = api_key

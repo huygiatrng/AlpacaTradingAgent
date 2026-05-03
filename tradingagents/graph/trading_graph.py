@@ -3,25 +3,33 @@
 import os
 from pathlib import Path
 import json
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Dict, Any, Tuple, List, Optional
 
-from langchain_openai import ChatOpenAI
+import yfinance as yf
 from langgraph.prebuilt import ToolNode
 
+from tradingagents.llm_clients import create_llm_client
 from tradingagents.agents import *
 from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.agents.utils.memory import FinancialSituationMemory
+from tradingagents.agents.utils.memory import FinancialSituationMemory, TradingMemoryLog
 from tradingagents.agents.utils.agent_states import (
     AgentState,
     InvestDebateState,
     RiskDebateState,
 )
-from tradingagents.agents.utils.gpt5_llm import get_chat_model, is_gpt5_model, get_model_params_for_depth, describe_model_params
+from tradingagents.openai_model_registry import normalize_model_params, describe_model_params
 from tradingagents.run_logger import get_run_audit_logger
-from tradingagents.dataflows.interface import set_config
-from tradingagents.dataflows.config import get_openai_client_config
+from tradingagents.dataflows.config import (
+    get_llm_api_key,
+    get_openai_base_url,
+    is_local_openai_enabled,
+    set_config,
+)
+from tradingagents.dataflows.ticker_utils import TickerUtils, is_crypto_ticker
+from tradingagents.dataflows.utils import safe_ticker_component
 
+from .checkpointer import clear_checkpoint, get_checkpointer, thread_id
 from .conditional_logic import ConditionalLogic
 from .setup import GraphSetup
 from .propagation import Propagator
@@ -37,6 +45,7 @@ class TradingAgentsGraph:
         selected_analysts=["market", "social", "news", "fundamentals", "macro"],
         debug=False,
         config: Dict[str, Any] = None,
+        callbacks: Optional[List] = None,
     ):
         """Initialize the trading agents graph and components.
 
@@ -47,26 +56,21 @@ class TradingAgentsGraph:
         """
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
+        self.callbacks = callbacks or []
 
         # Update the interface's config
         set_config(self.config)
 
         # Create necessary directories
-        os.makedirs(
-            os.path.join(self.config["project_dir"], "dataflows/data_cache"),
-            exist_ok=True,
-        )
-
-        llm_client_config = get_openai_client_config()
-        api_key = llm_client_config.get("api_key")
-        base_url = llm_client_config.get("base_url")
+        os.makedirs(self.config["data_cache_dir"], exist_ok=True)
+        os.makedirs(self.config.get("results_dir", "eval_results"), exist_ok=True)
 
         # Initialize LLMs with appropriate parameters based on model type and research depth
         deep_think_model = self.config["deep_think_llm"]
         quick_think_model = self.config["quick_think_llm"]
         
-        # Get research depth from config (UI setting: "Shallow", "Medium", "Deep")
-        # This controls reasoning_effort, verbosity, and temperature based on model role
+        # Research depth now controls debate rounds. Model parameters are explicit
+        # per selected model and can be adjusted in the UI.
         research_depth = self.config.get("research_depth", "Medium")
         
         # Convert integer research_depth (from debate rounds) back to string if needed
@@ -74,34 +78,59 @@ class TradingAgentsGraph:
             depth_map = {1: "Shallow", 2: "Medium", 3: "Deep"}
             research_depth = depth_map.get(research_depth, "Medium")
         
-        # Get model parameters based on research depth and model role
-        # Quick thinker: prioritizes speed, lower reasoning effort
-        # Deep thinker: prioritizes quality, higher reasoning effort
-        quick_think_kwargs = get_model_params_for_depth(quick_think_model, research_depth, "quick")
-        deep_think_kwargs = get_model_params_for_depth(deep_think_model, research_depth, "deep")
+        quick_think_kwargs = normalize_model_params(
+            quick_think_model,
+            self.config.get("quick_llm_params"),
+            role="quick",
+        )
+        deep_think_kwargs = normalize_model_params(
+            deep_think_model,
+            self.config.get("deep_llm_params"),
+            role="deep",
+        )
         
         # Log the configuration being used
-        quick_params_desc = describe_model_params(quick_think_model, research_depth, "quick")
-        deep_params_desc = describe_model_params(deep_think_model, research_depth, "deep")
-        print(f"[LLM CONFIG] Research Depth: {research_depth}")
+        quick_params_desc = describe_model_params(quick_think_model, quick_think_kwargs, "quick")
+        deep_params_desc = describe_model_params(deep_think_model, deep_think_kwargs, "deep")
+        print(f"[LLM CONFIG] Research Depth: {research_depth} (debate rounds only)")
         print(f"[LLM CONFIG] Quick Thinker ({quick_think_model}): {quick_params_desc}")
         print(f"[LLM CONFIG] Deep Thinker ({deep_think_model}): {deep_params_desc}")
-        if base_url:
-            print(f"[LLM CONFIG] Using local OpenAI-compatible endpoint: {base_url}")
-        
-        self.deep_thinking_llm = get_chat_model(
-            deep_think_model, 
-            api_key=api_key,
-            base_url=base_url,
-            **deep_think_kwargs
+
+        provider = self.config.get("llm_provider", "openai").lower()
+        backend_url = self.config.get("backend_url")
+        if provider == "openai" and is_local_openai_enabled():
+            provider = "local_openai"
+            backend_url = backend_url or get_openai_base_url()
+        elif provider == "local_openai":
+            backend_url = backend_url or get_openai_base_url()
+        if backend_url:
+            print(f"[LLM CONFIG] Using OpenAI-compatible endpoint: {backend_url}")
+
+        base_llm_kwargs = self._get_provider_kwargs(provider)
+        if self.callbacks:
+            base_llm_kwargs["callbacks"] = self.callbacks
+
+        deep_client = create_llm_client(
+            provider=provider,
+            model=deep_think_model,
+            base_url=backend_url,
+            api_key=get_llm_api_key(provider),
+            model_role="deep",
+            **base_llm_kwargs,
+            **deep_think_kwargs,
         )
-        
-        self.quick_thinking_llm = get_chat_model(
-            quick_think_model, 
-            api_key=api_key,
-            base_url=base_url,
-            **quick_think_kwargs
+        quick_client = create_llm_client(
+            provider=provider,
+            model=quick_think_model,
+            base_url=backend_url,
+            api_key=get_llm_api_key(provider),
+            model_role="quick",
+            **base_llm_kwargs,
+            **quick_think_kwargs,
         )
+
+        self.deep_thinking_llm = deep_client.get_llm()
+        self.quick_thinking_llm = quick_client.get_llm()
         
         self.toolkit = Toolkit(config=self.config)
 
@@ -111,6 +140,7 @@ class TradingAgentsGraph:
         self.trader_memory = FinancialSituationMemory("trader_memory")
         self.invest_judge_memory = FinancialSituationMemory("invest_judge_memory")
         self.risk_manager_memory = FinancialSituationMemory("risk_manager_memory")
+        self.memory_log = TradingMemoryLog(self.config)
 
         # Create tool nodes
         self.tool_nodes = self._create_tool_nodes()
@@ -134,7 +164,7 @@ class TradingAgentsGraph:
             self.config,
         )
 
-        self.propagator = Propagator()
+        self.propagator = Propagator(max_recur_limit=self.config.get("max_recur_limit", 200))
         self.reflector = Reflector(self.quick_thinking_llm)
         self.signal_processor = SignalProcessor(self.quick_thinking_llm)
 
@@ -144,10 +174,143 @@ class TradingAgentsGraph:
         self.log_states_dict = {}  # date to full state dict
 
         # Set up the graph
-        self.graph = self.graph_setup.setup_graph(selected_analysts)
+        self.workflow = self.graph_setup.setup_graph(selected_analysts)
+        self.graph = self.workflow.compile()
+        self._checkpointer_ctx = None
+
+    def _get_provider_kwargs(self, provider: str) -> Dict[str, Any]:
+        kwargs: Dict[str, Any] = {}
+        provider = (provider or "openai").lower()
+        if provider == "google" and self.config.get("google_thinking_level"):
+            kwargs["thinking_level"] = self.config["google_thinking_level"]
+        elif provider in ("openai", "local_openai") and self.config.get("openai_reasoning_effort"):
+            kwargs["reasoning_effort"] = self.config["openai_reasoning_effort"]
+        elif provider == "anthropic" and self.config.get("anthropic_effort"):
+            kwargs["effort"] = self.config["anthropic_effort"]
+        return kwargs
+
+    def _graph_for_run(self, ticker: str, trade_date: str):
+        """Return a compiled graph and optional checkpointer context for one run."""
+        if not self.config.get("checkpoint_enabled", False):
+            return self.graph, None
+
+        checkpointer_ctx = get_checkpointer(self.config["data_cache_dir"], ticker)
+        checkpointer = checkpointer_ctx.__enter__()
+        return self.workflow.compile(checkpointer=checkpointer), checkpointer_ctx
+
+    def _graph_args_for_run(self, ticker: str, trade_date: str) -> Dict[str, Any]:
+        args = self.propagator.get_graph_args()
+        if self.config.get("checkpoint_enabled", False):
+            args["config"].setdefault("configurable", {})["thread_id"] = thread_id(
+                ticker, str(trade_date)
+            )
+        return args
+
+    def _ticker_for_yfinance(self, ticker: str) -> str:
+        try:
+            return TickerUtils.convert_for_api(ticker, "yahoo")
+        except Exception:
+            return ticker.replace("/", "-")
+
+    def _benchmark_for(self, ticker: str) -> Optional[str]:
+        if is_crypto_ticker(ticker):
+            base = self._ticker_for_yfinance(ticker).split("-")[0].upper()
+            return None if base == "BTC" else "BTC-USD"
+        return None if ticker.upper() == "SPY" else "SPY"
+
+    def _fetch_return(self, ticker: str, start_date: date, holding_days: int) -> Optional[float]:
+        if datetime.now().date() < start_date + timedelta(days=holding_days):
+            return None
+
+        symbol = self._ticker_for_yfinance(ticker)
+        start = start_date.isoformat()
+        end = (start_date + timedelta(days=holding_days + 7)).isoformat()
+        try:
+            data = yf.download(
+                symbol,
+                start=start,
+                end=end,
+                progress=False,
+                auto_adjust=True,
+                actions=False,
+                threads=False,
+            )
+        except Exception:
+            return None
+
+        if data is None or data.empty or "Close" not in data:
+            return None
+
+        close = data["Close"]
+        if hasattr(close, "columns"):
+            close = close.iloc[:, 0]
+        close = close.dropna()
+        if len(close) < 2:
+            return None
+        start_price = float(close.iloc[0])
+        end_price = float(close.iloc[-1])
+        if start_price == 0:
+            return None
+        return (end_price / start_price) - 1.0
+
+    def _resolve_memory_log_outcomes(self, ticker: str, trade_date: str) -> None:
+        holding_days = int(self.config.get("memory_outcome_holding_days", 5))
+        try:
+            current_date = datetime.strptime(str(trade_date), "%Y-%m-%d").date()
+        except ValueError:
+            current_date = date.today()
+
+        for entry in self.memory_log.get_pending_entries(ticker):
+            entry_date_text = entry.get("date")
+            if not entry_date_text:
+                continue
+            try:
+                entry_date = datetime.strptime(entry_date_text, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if entry_date >= current_date:
+                continue
+
+            raw_return = self._fetch_return(ticker, entry_date, holding_days)
+            if raw_return is None:
+                continue
+
+            benchmark = self._benchmark_for(ticker)
+            benchmark_return = (
+                self._fetch_return(benchmark, entry_date, holding_days)
+                if benchmark
+                else None
+            )
+            alpha_return = (
+                raw_return - benchmark_return
+                if benchmark_return is not None
+                else None
+            )
+            try:
+                reflection = self.reflector.reflect_on_final_decision(
+                    entry.get("decision", ""), raw_return, alpha_return
+                )
+            except Exception:
+                reflection = "Outcome resolved, but reflection generation failed."
+            self.memory_log.update_with_outcome(
+                ticker=ticker,
+                trade_date=entry_date_text,
+                raw_return=raw_return,
+                alpha_return=alpha_return,
+                holding_days=holding_days,
+                reflection=reflection,
+            )
 
     def _create_tool_nodes(self) -> Dict[str, ToolNode]:
         """Create tool nodes for different data sources."""
+        news_tools = [
+            self.toolkit.get_google_news,
+            self.toolkit.get_finnhub_news_recent,
+            self.toolkit.get_coindesk_news,
+        ]
+        if self.config.get("news_global_openai_enabled", False):
+            news_tools.insert(0, self.toolkit.get_global_news_openai)
+
         return {
             "market": ToolNode(
                 [
@@ -168,15 +331,7 @@ class TradingAgentsGraph:
                     self.toolkit.get_reddit_news,
                 ]
             ),
-            "news": ToolNode(
-                [
-                    # online tools
-                    self.toolkit.get_global_news_openai,
-                    self.toolkit.get_google_news,
-                    self.toolkit.get_finnhub_news_recent,
-                    self.toolkit.get_coindesk_news,
-                ]
-            ),
+            "news": ToolNode(news_tools),
             "fundamentals": ToolNode(
                 [
                     # online tools
@@ -206,12 +361,14 @@ class TradingAgentsGraph:
 
         self.ticker = company_name
         run_logger = get_run_audit_logger()
+        self._resolve_memory_log_outcomes(company_name, str(trade_date))
 
         # Initialize state
         init_agent_state = self.propagator.create_initial_state(
             company_name, trade_date
         )
-        args = self.propagator.get_graph_args()
+        args = self._graph_args_for_run(company_name, str(trade_date))
+        graph, checkpointer_ctx = self._graph_for_run(company_name, str(trade_date))
         run_logger.start_run(
             symbol=company_name,
             trade_date=str(trade_date),
@@ -228,7 +385,7 @@ class TradingAgentsGraph:
             if self.debug:
                 # Debug mode with tracing
                 trace = []
-                for chunk in self.graph.stream(init_agent_state, **args):
+                for chunk in graph.stream(init_agent_state, **args):
                     if len(chunk["messages"]) == 0:
                         pass
                     else:
@@ -238,7 +395,7 @@ class TradingAgentsGraph:
                 final_state = trace[-1]
             else:
                 # Standard mode without tracing
-                final_state = self.graph.invoke(init_agent_state, **args)
+                final_state = graph.invoke(init_agent_state, **args)
         except Exception as e:
             run_logger.finish_run(
                 symbol=company_name,
@@ -246,6 +403,9 @@ class TradingAgentsGraph:
                 error_message=str(e),
             )
             raise
+        finally:
+            if checkpointer_ctx is not None:
+                checkpointer_ctx.__exit__(None, None, None)
 
         # Store current state for reflection
         self.curr_state = final_state
@@ -285,6 +445,17 @@ class TradingAgentsGraph:
                 final_state=final_state,
                 final_signal=final_signal,
             )
+            self.memory_log.store_decision(
+                ticker=company_name,
+                trade_date=str(trade_date),
+                final_trade_decision=final_state["final_trade_decision"],
+                trading_mode=final_state.get(
+                    "trading_mode",
+                    self.config.get("trading_mode", "investment"),
+                ),
+            )
+            if self.config.get("checkpoint_enabled", False):
+                clear_checkpoint(self.config["data_cache_dir"], company_name, str(trade_date))
             return final_state, final_signal
         except Exception as e:
             run_logger.finish_run(
@@ -329,13 +500,15 @@ class TradingAgentsGraph:
         }
 
         # Save to file
-        directory = Path(f"eval_results/{self.ticker}/TradingAgentsStrategy_logs/")
+        safe_ticker = safe_ticker_component(self.ticker)
+        directory = (
+            Path(self.config.get("results_dir", "eval_results"))
+            / safe_ticker
+            / "TradingAgentsStrategy_logs"
+        )
         directory.mkdir(parents=True, exist_ok=True)
 
-        with open(
-            f"eval_results/{self.ticker}/TradingAgentsStrategy_logs/full_states_log.json",
-            "w",
-        ) as f:
+        with open(directory / "full_states_log.json", "w", encoding="utf-8") as f:
             json.dump(self.log_states_dict, f, indent=4)
 
     def reflect_and_remember(self, returns_losses):

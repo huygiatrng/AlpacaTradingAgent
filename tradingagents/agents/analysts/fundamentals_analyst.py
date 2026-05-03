@@ -39,40 +39,47 @@ def create_fundamentals_analyst(llm, toolkit):
                 elif "USD" in ticker.upper():
                     display_ticker = ticker.upper().replace("USD", "")
 
-            if toolkit.config["online_tools"]:
-                if is_crypto:
-                    tools = [
-                        toolkit.get_defillama_fundamentals,
-                        toolkit.get_fundamentals_openai,
-                    ]
-                    # print(f"[FUNDAMENTALS] Using online crypto tools: DeFiLlama + OpenAI fundamentals")
-                else:
-                    tools = [
-                        toolkit.get_fundamentals_openai,
-                        toolkit.get_finnhub_company_insider_sentiment,
-                        toolkit.get_finnhub_company_insider_transactions,
-                        toolkit.get_simfin_balance_sheet,
-                        toolkit.get_simfin_cashflow,
-                        toolkit.get_simfin_income_stmt,
-                    ]
-                    # print(f"[FUNDAMENTALS] Using online stock tools: OpenAI + Finnhub + SimFin")
+            openai_available = toolkit.has_openai_web_search()
+            finnhub_available = toolkit.has_finnhub()
+            simfin_available = toolkit.has_simfin_data()
+
+            if toolkit.config["online_tools"] and openai_available:
+                base_openai_tools = [toolkit.get_fundamentals_openai]
             else:
-                if is_crypto:
-                    tools = [toolkit.get_defillama_fundamentals]
-                else:
-                    tools = [
-                        toolkit.get_finnhub_company_insider_sentiment,
-                        toolkit.get_finnhub_company_insider_transactions,
-                        toolkit.get_simfin_balance_sheet,
-                        toolkit.get_simfin_cashflow,
-                        toolkit.get_simfin_income_stmt,
-                    ]
-                # print(f"[FUNDAMENTALS] Using offline tools: Finnhub + SimFin (stock) or DeFiLlama (crypto)")
+                base_openai_tools = []
+
+            if is_crypto:
+                tools = [toolkit.get_defillama_fundamentals] + base_openai_tools
+                active_sources = ["DeFiLlama"] + (["OpenAI web search"] if base_openai_tools else [])
+            else:
+                tools = []
+                tools.extend(base_openai_tools)
+                if finnhub_available:
+                    tools.extend(
+                        [
+                            toolkit.get_finnhub_company_insider_sentiment,
+                            toolkit.get_finnhub_company_insider_transactions,
+                        ]
+                    )
+                if simfin_available:
+                    tools.extend(
+                        [
+                            toolkit.get_simfin_balance_sheet,
+                            toolkit.get_simfin_cashflow,
+                            toolkit.get_simfin_income_stmt,
+                        ]
+                    )
+                active_sources = []
+                if base_openai_tools:
+                    active_sources.append("OpenAI web search")
+                if finnhub_available:
+                    active_sources.append("Finnhub")
+                if simfin_available:
+                    active_sources.append("SimFin")
 
             source_guidance = (
-                " When online tools are enabled, combine OpenAI web-search fundamentals with structured data tools before concluding."
-                " For stocks, use OpenAI + Finnhub + SimFin."
-                " For crypto, use OpenAI + DeFiLlama."
+                " Use all available fundamentals tools before concluding. "
+                + (f"Active sources now: {', '.join(active_sources)}." if active_sources else "No external fundamentals source is available; reason from existing context only.")
             )
             system_message = (
                 "You are a SWING TRADING fundamentals analyst focused on identifying fundamental catalysts and factors that could drive multi-day price movements (2-10 day swing horizon). "
@@ -147,7 +154,7 @@ For your reference, the current date is {current_date}. {asset_type_text} {ticke
                 # Fallback to system message only
                 capture_agent_prompt("fundamentals_report", system_message, ticker)
 
-            chain = prompt | llm.bind_tools(tools)
+            chain = prompt | (llm.bind_tools(tools) if tools else llm)
             
             # print(f"[FUNDAMENTALS] Invoking LLM chain...")
             # Copy the incoming conversation history so we can append to it when the model makes tool calls
@@ -155,9 +162,15 @@ For your reference, the current date is {current_date}. {asset_type_text} {ticke
 
             # First LLM response
             result = chain.invoke(messages_history)
+            max_tool_iterations = int(toolkit.config.get("max_tool_iterations_per_agent", 8))
+            max_same_call_repeats = int(toolkit.config.get("max_same_tool_call_repeats", 1))
+            tool_call_counts = {}
+            tool_result_cache = {}
+            iteration_count = 0
 
             # Handle iterative tool calls until the model stops requesting them
-            while getattr(result, "additional_kwargs", {}).get("tool_calls"):
+            while tools and getattr(result, "additional_kwargs", {}).get("tool_calls") and iteration_count < max_tool_iterations:
+                iteration_count += 1
                 for tool_call in result.additional_kwargs["tool_calls"]:
                     # Handle different tool call structures
                     if isinstance(tool_call, dict):
@@ -180,15 +193,27 @@ For your reference, the current date is {current_date}. {asset_type_text} {ticke
                         tool_result = f"Tool '{tool_name}' not found."
                         # print(f"[FUNDAMENTALS] ⚠️ {tool_result}")
                     else:
-                        try:
-                            # LangChain Tool objects expose `.run` (string IO) as well as `.invoke` (dict/kwarg IO)
-                            if hasattr(tool_fn, "invoke"):
-                                tool_result = tool_fn.invoke(tool_args)
-                            else:
-                                tool_result = tool_fn.run(**tool_args)
-                            
-                        except Exception as tool_err:
-                            tool_result = f"Error running tool '{tool_name}': {str(tool_err)}"
+                        call_signature = f"{tool_name}:{json.dumps(tool_args, sort_keys=True, default=str)}"
+                        call_count = tool_call_counts.get(call_signature, 0) + 1
+                        tool_call_counts[call_signature] = call_count
+
+                        if call_signature in tool_result_cache:
+                            tool_result = tool_result_cache[call_signature]
+                        elif call_count > max_same_call_repeats:
+                            tool_result = (
+                                f"Skipped repeated tool call '{tool_name}' with identical arguments "
+                                f"after {max_same_call_repeats} execution(s). Reuse previous evidence."
+                            )
+                        else:
+                            try:
+                                # LangChain Tool objects expose `.run` (string IO) as well as `.invoke` (dict/kwarg IO)
+                                if hasattr(tool_fn, "invoke"):
+                                    tool_result = tool_fn.invoke(tool_args)
+                                else:
+                                    tool_result = tool_fn.run(**tool_args)
+                                tool_result_cache[call_signature] = str(tool_result)
+                            except Exception as tool_err:
+                                tool_result = f"Error running tool '{tool_name}': {str(tool_err)}"
 
                     # Append the assistant tool call and tool result messages so the LLM can continue the conversation
                     tool_call_id = tool_call.get("id") or tool_call.get("tool_call_id")
@@ -206,6 +231,14 @@ For your reference, the current date is {current_date}. {asset_type_text} {ticke
 
                 # Ask the LLM to continue with the new context
                 result = chain.invoke(messages_history)
+
+            if tools and getattr(result, "additional_kwargs", {}).get("tool_calls"):
+                result = AIMessage(
+                    content=(
+                        (result.content or "").strip()
+                        + f"\n\nTool-loop halted after {max_tool_iterations} iterations to prevent endless retries."
+                    ).strip()
+                )
              
             elapsed_time = time.time() - start_time
             # print(f"[FUNDAMENTALS] ✅ Analysis completed in {elapsed_time:.2f} seconds")

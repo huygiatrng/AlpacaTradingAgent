@@ -5,73 +5,21 @@ Storage callbacks for persisting user settings in localStorage
 from dash import Input, Output, State, callback_context as ctx
 from webui.utils.storage import get_default_settings
 
+
+def _parse_symbols(value):
+    if isinstance(value, list):
+        return [str(symbol).strip().upper() for symbol in value if str(symbol).strip()]
+    return [symbol.strip().upper() for symbol in (value or "").split(",") if symbol.strip()]
+
+
 def register_storage_callbacks(app):
     """Register storage-related callbacks"""
-    
-    # Callback to load settings from localStorage on page load
-    @app.callback(
-        [
-            Output("ticker-input", "value"),
-            Output("analyst-market", "value"),
-            Output("analyst-social", "value"),
-            Output("analyst-news", "value"),
-            Output("analyst-fundamentals", "value"),
-            Output("analyst-macro", "value"),
-            Output("research-depth", "value"),
-            Output("allow-shorts", "value"),
-            Output("loop-interval", "value"),
-            Output("market-hours-input", "value"),
-            Output("trade-after-analyze", "value"),
-            Output("trade-dollar-amount", "value"),
-            Output("quick-llm", "value"),
-            Output("deep-llm", "value")
-        ],
-        Input("settings-store", "data")
-    )
-    def load_settings(stored_settings):
-        """Load settings from localStorage store"""
-        if not stored_settings:
-            # Return default settings if nothing stored
-            defaults = get_default_settings()
-            return [
-                defaults["ticker_input"],
-                defaults["analyst_market"],
-                defaults["analyst_social"],
-                defaults["analyst_news"],
-                defaults["analyst_fundamentals"],
-                defaults["analyst_macro"],
-                defaults["research_depth"],
-                defaults["allow_shorts"],
-                defaults["loop_interval"],
-                defaults["market_hours_input"],
-                defaults["trade_after_analyze"],
-                defaults["trade_dollar_amount"],
-                defaults["quick_llm"],
-                defaults["deep_llm"]
-            ]
-        
-        return [
-            stored_settings.get("ticker_input", "NVDA, AMD, TSLA"),
-            stored_settings.get("analyst_market", True),
-            stored_settings.get("analyst_social", True),
-            stored_settings.get("analyst_news", True),
-            stored_settings.get("analyst_fundamentals", True),
-            stored_settings.get("analyst_macro", True),
-            stored_settings.get("research_depth", "Shallow"),
-            stored_settings.get("allow_shorts", False),
-            stored_settings.get("loop_interval", 60),
-            stored_settings.get("market_hours_input", ""),
-            stored_settings.get("trade_after_analyze", False),
-            stored_settings.get("trade_dollar_amount", 4500),
-            stored_settings.get("quick_llm", "gpt-5-nano"),
-            stored_settings.get("deep_llm", "gpt-5-nano")
-        ]
-    
+
     # Callback to save settings to localStorage when they change
     @app.callback(
         Output("settings-store", "data"),
         [
-            Input("ticker-input", "value"),
+            Input("ticker-picker", "value"),
             Input("analyst-market", "value"),
             Input("analyst-social", "value"),
             Input("analyst-news", "value"),
@@ -83,8 +31,16 @@ def register_storage_callbacks(app):
             Input("market-hours-input", "value"),
             Input("trade-after-analyze", "value"),
             Input("trade-dollar-amount", "value"),
+            Input("llm-provider", "value"),
+            Input("backend-url", "value"),
+            Input("output-language", "value"),
+            Input("checkpoint-enabled", "value"),
             Input("quick-llm", "value"),
-            Input("deep-llm", "value")
+            Input("deep-llm", "value"),
+            Input("quick-llm-custom-model", "value"),
+            Input("deep-llm-custom-model", "value"),
+            Input("google-thinking-level", "value"),
+            Input("anthropic-effort", "value"),
         ],
         [
             State("settings-store", "data"),
@@ -93,10 +49,13 @@ def register_storage_callbacks(app):
         ],
         prevent_initial_call=True
     )
-    def save_settings(ticker_input, analyst_market, analyst_social, analyst_news,
+    def save_settings(ticker_symbols, analyst_market, analyst_social, analyst_news,
                      analyst_fundamentals, analyst_macro, research_depth, allow_shorts,
                      loop_interval, market_hours_input,
-                     trade_after_analyze, trade_dollar_amount, quick_llm, deep_llm,
+                     trade_after_analyze, trade_dollar_amount,
+                     llm_provider, backend_url, output_language, checkpoint_enabled,
+                     quick_llm, deep_llm, quick_llm_custom_model, deep_llm_custom_model,
+                     google_thinking_level, anthropic_effort,
                      current_settings, loop_enabled, market_hour_enabled):
         """Save settings to localStorage store"""
         
@@ -105,7 +64,7 @@ def register_storage_callbacks(app):
             return current_settings or get_default_settings()
         
         new_settings = {
-            "ticker_input": ticker_input,
+            "ticker_input": ", ".join(_parse_symbols(ticker_symbols)),
             "analyst_market": analyst_market,
             "analyst_social": analyst_social,
             "analyst_news": analyst_news,
@@ -119,8 +78,16 @@ def register_storage_callbacks(app):
             "market_hours_input": market_hours_input,
             "trade_after_analyze": trade_after_analyze,
             "trade_dollar_amount": trade_dollar_amount,
+            "llm_provider": llm_provider,
+            "backend_url": backend_url,
+            "output_language": output_language,
+            "checkpoint_enabled": checkpoint_enabled,
             "quick_llm": quick_llm,
-            "deep_llm": deep_llm
+            "deep_llm": deep_llm,
+            "quick_llm_custom_model": quick_llm_custom_model or "",
+            "deep_llm_custom_model": deep_llm_custom_model or "",
+            "google_thinking_level": google_thinking_level or "",
+            "anthropic_effort": anthropic_effort or "",
         }
         
         # Check if settings actually changed to prevent circular updates

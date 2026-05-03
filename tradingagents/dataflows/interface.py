@@ -1,4 +1,4 @@
-from typing import Annotated, Dict
+from typing import Annotated, Dict, List, Tuple
 from .reddit_utils import (
     fetch_top_from_category,
     fetch_top_from_category_online,
@@ -26,13 +26,186 @@ import pandas as pd
 from .config import get_config, set_config, DATA_DIR, get_api_key
 from .interface_utils import (
     _coerce_bool,
+    extract_responses_text,
     _strip_trailing_interactive_followup,
     get_global_news_profile_for_depth,
-    get_llm_params_for_depth,
     get_model_params,
     get_openai_client_with_timeout,
     get_search_context_for_depth,
 )
+from tradingagents.openai_model_registry import (
+    apply_responses_model_params,
+    is_responses_model,
+    normalize_model_params,
+)
+
+
+def _cap_headline_sections(
+    text: str,
+    max_sections: int = 10,
+    max_chars: int = 7000,
+) -> str:
+    """Keep at most N markdown `###` sections to avoid oversized fallback payloads."""
+    body = str(text or "").strip()
+    if not body:
+        return ""
+
+    lines = body.splitlines()
+    kept: List[str] = []
+    section_count = 0
+    for line in lines:
+        if line.startswith("### "):
+            section_count += 1
+            if section_count > max_sections:
+                break
+        kept.append(line)
+
+    clipped = "\n".join(kept).strip()
+    if len(clipped) > max_chars:
+        clipped = clipped[:max_chars].rstrip() + "\n..."
+    return clipped
+
+
+def _build_empty_openai_global_fallback(curr_date: str, ticker_context: str | None = None) -> str:
+    target = str(ticker_context or "global markets").strip()
+    query = f"{target} macro economy central bank inflation"
+    google = get_google_news(query=query, curr_date=curr_date, look_back_days=5)
+    google = _cap_headline_sections(google, max_sections=8, max_chars=6000)
+    if google:
+        return (
+            f"Fallback used because OpenAI web-search returned empty output.\n"
+            f"## Global/Macro news proxy for {target} on {curr_date}\n\n{google}"
+        )
+    return (
+        f"Fallback used because OpenAI web-search returned empty output.\n"
+        f"No sufficiently relevant global-news items were found via fallback sources for {target} ({curr_date})."
+    )
+
+
+def _build_empty_openai_stock_news_fallback(ticker: str, curr_date: str) -> str:
+    snippets: List[Tuple[str, str]] = []
+
+    google = get_google_news(query=ticker, curr_date=curr_date, look_back_days=7)
+    google = _cap_headline_sections(google, max_sections=8, max_chars=4500)
+    if google:
+        snippets.append(("Google News fallback", google))
+
+    finnhub = get_finnhub_news(ticker=ticker, curr_date=curr_date, look_back_days=4)
+    finnhub = _cap_headline_sections(finnhub, max_sections=8, max_chars=4500)
+    if finnhub:
+        snippets.append(("Finnhub fallback", finnhub))
+
+    if not snippets:
+        return (
+            f"Fallback used because OpenAI web-search returned empty output.\n"
+            f"No fallback stock-news items found for {ticker} as of {curr_date}."
+        )
+
+    merged = [f"Fallback used because OpenAI web-search returned empty output for {ticker}.", ""]
+    for label, text in snippets:
+        merged.append(f"## {label}")
+        merged.append(text)
+        merged.append("")
+    return "\n".join(merged).strip()
+
+
+def _build_empty_openai_fundamentals_fallback(ticker: str, curr_date: str) -> str:
+    insider_sent = get_finnhub_company_insider_sentiment(ticker, curr_date, 30)
+    insider_tx = get_finnhub_company_insider_transactions(ticker, curr_date, 30)
+    finnhub_news = get_finnhub_news(ticker, curr_date, 5)
+
+    sent_text = _cap_headline_sections(insider_sent, max_sections=8, max_chars=2500)
+    tx_text = _cap_headline_sections(insider_tx, max_sections=10, max_chars=3500)
+    news_text = _cap_headline_sections(finnhub_news, max_sections=6, max_chars=2800)
+
+    return (
+        f"Fallback used because OpenAI fundamentals web-search returned empty output for {ticker} ({curr_date}).\n\n"
+        f"## Insider Sentiment Snapshot\n{sent_text}\n\n"
+        f"## Insider Transactions Snapshot\n{tx_text}\n\n"
+        f"## Recent Company News Snapshot\n{news_text}"
+    ).strip()
+
+
+def _uses_responses_for_web_search(model: str) -> bool:
+    """Use Responses API for models that support hosted web search tools."""
+    model_name = str(model or "")
+    return is_responses_model(model_name) or model_name.startswith("gpt-4.1")
+
+
+def _quick_model_params_for_tool(
+    model: str,
+    config: Dict,
+    *,
+    max_output_tokens: int,
+    store_responses: bool,
+) -> Dict:
+    params = normalize_model_params(
+        model,
+        config.get("quick_llm_params"),
+        role="quick",
+    )
+    params.setdefault("max_output_tokens", max_output_tokens)
+    params.setdefault("store", store_responses)
+    return params
+
+
+def _build_web_search_response_params(
+    *,
+    model: str,
+    developer_message: str,
+    user_message: str,
+    search_context: str,
+    max_output_tokens: int,
+    store_responses: bool,
+    model_params: Dict,
+    include_reasoning: bool = False,
+) -> Dict:
+    role = "developer" if is_responses_model(model) else "system"
+    api_params = {
+        "model": model,
+        "input": [
+            {
+                "role": role,
+                "content": [{"type": "input_text", "text": developer_message}],
+            },
+            {
+                "role": "user",
+                "content": [{"type": "input_text", "text": user_message}],
+            },
+        ],
+        "text": {"format": {"type": "text"}},
+        "tools": [
+            {
+                "type": "web_search",
+                "user_location": {"type": "approximate"},
+                "search_context_size": search_context,
+            }
+        ],
+        "include": ["web_search_call.action.sources"],
+    }
+    if include_reasoning:
+        api_params["include"].insert(0, "reasoning.encrypted_content")
+
+    tool_params = dict(model_params or {})
+    tool_params.setdefault("max_output_tokens", max_output_tokens)
+    tool_params.setdefault("store", store_responses)
+    apply_responses_model_params(api_params, model, tool_params, role="quick")
+
+    # Store is a Responses API-level field. Keep it available even for the
+    # non-reasoning GPT-4.1 path, where it is not shown as a per-model UI knob.
+    api_params.setdefault("store", store_responses)
+    return api_params
+
+
+def _create_response_with_output_cap_fallback(client, api_params: Dict):
+    try:
+        return client.responses.create(**api_params)
+    except Exception as output_cap_error:
+        if "max_output_tokens" in api_params and "max_output_tokens" in str(output_cap_error):
+            fallback_params = dict(api_params)
+            fallback_params.pop("max_output_tokens", None)
+            return client.responses.create(**fallback_params)
+        raise
 
 
 def get_finnhub_news(
@@ -452,31 +625,85 @@ def get_simfin_income_statements(
     )
 
 
+def _normalize_news_dedupe_key(title: str, link: str) -> str:
+    title_key = " ".join(str(title or "").lower().split())
+    link_key = str(link or "").strip().lower().rstrip("/")
+    return f"{title_key}|{link_key}"
+
+
+def _expand_google_news_query(query: str) -> str:
+    base = str(query or "").strip()
+    if not base:
+        return base
+    if "/" in base or base.upper().endswith("USD") or base.upper().endswith("USDT"):
+        return base
+
+    compact = base.upper().replace("/", "").replace("-", "")
+    likely_ticker = compact.isalpha() and len(compact) <= 6 and " " not in base
+    if not likely_ticker:
+        return base
+
+    try:
+        company_name = AlpacaUtils.get_company_name(compact)
+    except Exception:
+        company_name = ""
+
+    company_name = str(company_name or "").strip()
+    if not company_name or company_name.upper() == compact:
+        return base
+
+    if " OR " in company_name:
+        alias_terms = [part.strip() for part in company_name.split(" OR ") if part.strip()]
+    else:
+        alias_terms = [company_name]
+
+    expanded_terms = [compact, f"${compact}"] + alias_terms
+    expanded_terms = [term for term in dict.fromkeys(expanded_terms) if term]
+    return " OR ".join(expanded_terms)
+
+
 def get_google_news(
     query: Annotated[str, "Query to search with"],
     curr_date: Annotated[str, "Curr date in yyyy-mm-dd format"],
     look_back_days: Annotated[int, "how many days to look back"],
 ) -> str:
-    query = query.replace(" ", "+")
+    query_for_search = _expand_google_news_query(query)
+    query_encoded = query_for_search.replace(" ", "+")
 
     start_date = datetime.strptime(curr_date, "%Y-%m-%d")
     before = start_date - relativedelta(days=look_back_days)
     before = before.strftime("%Y-%m-%d")
 
-    # Limit to 2 pages for better performance (about 20 articles max)
-    news_results = getNewsData(query, before, curr_date, max_pages=2)
+    config = get_config()
+    max_pages = int(config.get("google_news_max_pages", 3))
+    max_items = int(config.get("google_news_max_items", 18))
 
-    news_str = ""
-
-    for news in news_results:
-        news_str += (
-            f"### {news['title']} (source: {news['source']}) \n\n{news['snippet']}\n\n"
-        )
-
-    if len(news_results) == 0:
+    news_results = getNewsData(query_encoded, before, curr_date, max_pages=max_pages)
+    if not news_results:
         return ""
 
-    return f"## {query} Google News, from {before} to {curr_date}:\n\n{news_str}"
+    deduped: List[dict] = []
+    seen = set()
+    for news in news_results:
+        key = _normalize_news_dedupe_key(news.get("title", ""), news.get("link", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(news)
+        if len(deduped) >= max_items:
+            break
+
+    news_str = ""
+    for news in deduped:
+        source = news.get("source", "Unknown")
+        date_text = news.get("date", "Unknown date")
+        snippet = str(news.get("snippet", "")).strip()
+        news_str += f"### {news.get('title', 'Untitled')} (source: {source}, date: {date_text})\n\n{snippet}\n\n"
+
+    return (
+        f"## {query_for_search} Google News, from {before} to {curr_date} "
+        f"(items: {len(deduped)}, deduped from {len(news_results)}):\n\n{news_str}"
+    )
 
 
 def get_reddit_global_news(
@@ -502,7 +729,6 @@ def get_reddit_global_news(
     posts = []
     used_online_fallback = False
     local_data_path = os.path.join(DATA_DIR, "reddit_data")
-    attempted_terms = get_search_terms(ticker)
 
     for offset in range((end_dt - start_dt).days + 1):
         day_str = (start_dt + relativedelta(days=offset)).strftime("%Y-%m-%d")
@@ -569,6 +795,7 @@ def get_reddit_company_news(
     posts = []
     used_online_fallback = False
     local_data_path = os.path.join(DATA_DIR, "reddit_data")
+    attempted_terms = get_search_terms(ticker)
 
     for offset in range((end_dt - start_dt).days + 1):
         day_str = (start_dt + relativedelta(days=offset)).strftime("%Y-%m-%d")
@@ -613,7 +840,11 @@ def get_reddit_company_news(
             news_str += f"### {post.get('title', 'Untitled')}{source_tag}\n\n{content}\n\n"
 
     source = "reddit_live_api" if used_online_fallback else "reddit_local_dataset"
-    return f"## {ticker} News Reddit, from {before} to {end_str} (source: {source}):\n\n{news_str}"
+    terms_preview = ", ".join(attempted_terms[:8]) if attempted_terms else ticker
+    return (
+        f"## {ticker} News Reddit, from {before} to {end_str} (source: {source}):\n"
+        f"Searched terms: {terms_preview}\n\n{news_str}"
+    )
 
 
 def get_stock_stats_indicators_window(
@@ -701,6 +932,203 @@ def get_stockstats_indicator(
         return f"Error getting {indicator} for {symbol}: {str(e)}"
 
 
+_INDICATOR_ALIAS_MAP = {
+    "close": "close",
+    "open": "open",
+    "high": "high",
+    "low": "low",
+    "volume": "volume",
+    "vwap": "vwap",
+    "ema_8": "ema_8",
+    "close_8_ema": "ema_8",
+    "ema_10": "ema_10",
+    "close_10_ema": "ema_10",
+    "ema_21": "ema_21",
+    "close_21_ema": "ema_21",
+    "sma_20": "sma_20",
+    "close_20_sma": "sma_20",
+    "sma_50": "sma_50",
+    "close_50_sma": "sma_50",
+    "rsi": "rsi_14",
+    "rsi_14": "rsi_14",
+    "adx": "adx_14",
+    "adx_14": "adx_14",
+    "macd": "macd",
+    "macds": "macds",
+    "macdh": "macdh",
+    "atr": "atr_14",
+    "atr_14": "atr_14",
+    "boll_ub": "boll_ub",
+    "boll_lb": "boll_lb",
+    "stoch_k": "stoch_k",
+    "stoch_d": "stoch_d",
+    "obv": "obv",
+    "volume_delta": "volume_delta",
+}
+
+_TIMEFRAME_TO_BRIEF_KEY = {
+    "1h": "1h",
+    "1hour": "1h",
+    "4h": "4h",
+    "4hour": "4h",
+    "1d": "1d",
+    "1day": "1d",
+}
+
+
+def _ensure_indicator_column(df: pd.DataFrame, indicator_col: str) -> pd.DataFrame:
+    if indicator_col in df.columns:
+        return df
+
+    if indicator_col == "ema_10":
+        df["ema_10"] = df["close"].ewm(span=10, adjust=False).mean()
+    elif indicator_col == "sma_20":
+        df["sma_20"] = df["close"].rolling(window=20).mean()
+    elif indicator_col == "volume_delta":
+        df["volume_delta"] = df["volume"].diff()
+    return df
+
+
+def _format_indicator_history_table(
+    data: pd.DataFrame,
+    indicator_columns: List[str],
+    max_points: int,
+) -> str:
+    frame = data.tail(max(1, int(max_points))).copy()
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"])
+    frame["date"] = frame["timestamp"].dt.strftime("%Y-%m-%d %H:%M")
+
+    lines: List[str] = []
+    header_columns = ["Date"] + [col.upper() for col in indicator_columns]
+    lines.append("| " + " | ".join(header_columns) + " |")
+    lines.append("|" + "|".join(["---"] * len(header_columns)) + "|")
+
+    for _, row in frame.iterrows():
+        values = [row["date"]]
+        for col in indicator_columns:
+            value = row.get(col)
+            if pd.isna(value):
+                values.append("N/A")
+            elif col in ("volume", "obv", "volume_delta"):
+                values.append(f"{float(value):,.0f}")
+            elif col in ("macd", "macds", "macdh"):
+                values.append(f"{float(value):.4f}")
+            else:
+                values.append(f"{float(value):.2f}")
+        lines.append("| " + " | ".join(values) + " |")
+
+    return "\n".join(lines)
+
+
+def get_stockstats_indicator_history(
+    symbol: Annotated[str, "ticker symbol (stocks: AAPL, NVDA; crypto: ETH/USD, BTC/USD)"],
+    indicator: Annotated[str, "indicator name (e.g. rsi_14, macd, close_8_ema, all)"],
+    curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
+    timeframe: Annotated[str, "Chart timeframe: 1Hour, 4Hour, 1Day"] = "1Day",
+    look_back_days: Annotated[int, "Calendar days to include in history window"] = 60,
+    max_points: Annotated[int, "Maximum history points returned"] = 30,
+) -> str:
+    """
+    Return indicator history on a chosen timeframe so analysts can inspect multiple
+    indicators sequentially without requesting one giant report.
+    """
+    timeframe_key = _TIMEFRAME_TO_BRIEF_KEY.get(str(timeframe or "").lower().strip())
+    if not timeframe_key:
+        return "Error: timeframe must be one of 1Hour, 4Hour, 1Day."
+
+    try:
+        from .technical_brief import compute_indicators
+    except Exception as exc:
+        return f"Error loading technical indicator engine: {exc}"
+
+    df = compute_indicators(symbol, curr_date, timeframe_key)
+    if df is None or df.empty:
+        return f"No indicator data available for {symbol} on timeframe {timeframe}."
+
+    df = df.copy()
+    if "timestamp" not in df.columns:
+        return f"Error: indicator dataset for {symbol} lacks timestamp column."
+
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+    df = df.dropna(subset=["timestamp"]).sort_values("timestamp")
+    if df.empty:
+        return f"No indicator data available for {symbol} on timeframe {timeframe}."
+
+    end_ts = pd.to_datetime(curr_date, utc=True) + pd.Timedelta(days=1)
+    start_ts = end_ts - pd.Timedelta(days=max(1, int(look_back_days)))
+    df = df[(df["timestamp"] >= start_ts) & (df["timestamp"] <= end_ts)]
+    if df.empty:
+        return (
+            f"No indicator points found for {symbol} in lookback window {look_back_days} days "
+            f"on timeframe {timeframe}."
+        )
+
+    requested = str(indicator or "").lower().strip()
+    if not requested:
+        requested = "all"
+
+    if requested == "all":
+        columns = [
+            "close",
+            "ema_8",
+            "ema_21",
+            "sma_50",
+            "rsi_14",
+            "macd",
+            "macds",
+            "macdh",
+            "boll_ub",
+            "boll_lb",
+            "atr_14",
+            "obv",
+            "volume",
+        ]
+    else:
+        canonical = _INDICATOR_ALIAS_MAP.get(requested)
+        if not canonical:
+            supported = ", ".join(sorted(_INDICATOR_ALIAS_MAP.keys()))
+            return (
+                f"Error: unsupported indicator '{indicator}'. "
+                f"Supported indicators: {supported}, all."
+            )
+        columns = [canonical]
+
+    for col in columns:
+        df = _ensure_indicator_column(df, col)
+
+    missing_cols = [col for col in columns if col not in df.columns]
+    if missing_cols:
+        return f"Error: indicator data unavailable for columns: {', '.join(missing_cols)}."
+
+    latest = df.iloc[-1]
+    latest_lines = []
+    for col in columns:
+        value = latest.get(col)
+        if pd.isna(value):
+            latest_lines.append(f"- {col}: N/A")
+        elif col in ("volume", "obv", "volume_delta"):
+            latest_lines.append(f"- {col}: {float(value):,.0f}")
+        elif col in ("macd", "macds", "macdh"):
+            latest_lines.append(f"- {col}: {float(value):.4f}")
+        else:
+            latest_lines.append(f"- {col}: {float(value):.2f}")
+
+    table = _format_indicator_history_table(df, columns, max_points=max_points)
+    latest_ts = pd.to_datetime(latest["timestamp"]).strftime("%Y-%m-%d %H:%M")
+
+    return (
+        f"## Indicator history for {symbol}\n"
+        f"- Timeframe: {timeframe}\n"
+        f"- Lookback days: {look_back_days}\n"
+        f"- Latest bar: {latest_ts}\n"
+        f"- Requested indicator(s): {', '.join(columns)}\n\n"
+        f"### Latest values\n"
+        f"{chr(10).join(latest_lines)}\n\n"
+        f"### History table\n"
+        f"{table}"
+    )
+
+
 def get_stock_news_openai(ticker, curr_date):
     # Get API key from environment variables or config
     api_key = get_api_key("openai_api_key", "OPENAI_API_KEY")
@@ -715,34 +1143,35 @@ def get_stock_news_openai(ticker, curr_date):
         
         print(f"[SOCIAL] Using ticker format: {openai_ticker} (from input: {normalize_ticker_for_logs(ticker)})")
         
-        # Use client with timeout for web search operations
-        client = get_openai_client_with_timeout(api_key)
-        
-        # Get the selected quick model from config
         config = get_config()
-        model = config.get("quick_think_llm", "gpt-4o-mini")  # fallback to default
+        timeout_seconds = float(config.get("stock_news_timeout_seconds", 120))
+        max_output_tokens = int(config.get("stock_news_max_output_tokens", 900))
+        store_responses = _coerce_bool(config.get("openai_store_responses", False))
+
+        # Use client with timeout for web search operations
+        client = get_openai_client_with_timeout(api_key, timeout_seconds=timeout_seconds)
+
+        # Get the selected quick model from config
+        model = config.get("quick_think_llm", "gpt-5.4-nano")  # fallback to default
         
         # Research depth controls prompt scope and search context
         research_depth = config.get("research_depth", "Medium")
         depth_key = research_depth.lower() if research_depth else "medium"
-        search_context = get_search_context_for_depth(research_depth)
+        fast_profile = _coerce_bool(config.get("stock_news_fast_profile", True))
+        search_context = "low" if fast_profile else get_search_context_for_depth(research_depth)
         
         from datetime import datetime, timedelta
         lookback_days = 3 if depth_key == "shallow" else 7 if depth_key == "medium" else 14
         start_date = (datetime.strptime(curr_date, "%Y-%m-%d") - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
-        # Get model-specific parameters
-        model_params = get_model_params(model)
-        
-        # Check if this is a GPT-5/GPT-5.2 or GPT-4.1 model (both use responses.create())
-        gpt5_models = ["gpt-5", "gpt-5-mini", "gpt-5-nano"]
-        gpt52_models = ["gpt-5.2", "gpt-5.2-pro"]
-        gpt41_models = ["gpt-4.1"]
-        is_gpt5 = any(model_prefix in model for model_prefix in gpt5_models)
-        is_gpt52 = any(model_prefix in model for model_prefix in gpt52_models)
-        is_gpt41 = any(model_prefix in model for model_prefix in gpt41_models)
-        
-        if is_gpt5 or is_gpt52 or is_gpt41:
+        model_params = _quick_model_params_for_tool(
+            model,
+            config,
+            max_output_tokens=max_output_tokens,
+            store_responses=store_responses,
+        )
+
+        if _uses_responses_for_web_search(model):
             # Use responses.create() API with web search capabilities - use standardized ticker
             user_message = f"Search the web and analyze current social media sentiment and recent news for {ticker_info['display_format']} ({openai_ticker}) from {start_date} to {curr_date}. Include:\n" + \
                           f"1. Overall sentiment analysis from recent social media posts\n" + \
@@ -750,122 +1179,24 @@ def get_stock_news_openai(ticker, curr_date):
                           f"3. Notable price-moving news or events from the past week\n" + \
                           f"4. Trading implications based on current sentiment\n" + \
                           f"5. Summary table with key metrics"
-            
-            # Base parameters for responses.create()
-            if is_gpt52:
-                # GPT-5.2 uses "developer" role with specific parameters
-                api_params = {
-                    "model": model,
-                    "input": [
-                        {
-                            "role": "developer",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": "You are a financial research assistant with web search access. Use real-time web search to provide focused social media sentiment analysis and recent news about the specified ticker. Prioritize speed and key insights."
-                                }
-                            ]
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": user_message
-                                }
-                            ]
-                        }
-                    ],
-                    "text": {"format": {"type": "text"}},
-                    "tools": [{
-                        "type": "web_search",
-                        "user_location": {"type": "approximate"},
-                        "search_context_size": search_context
-                    }],
-                    "include": ["web_search_call.action.sources"]
-                }
-                # Apply GPT-5.2 specific parameters
-                api_params["summary"] = "auto"
-                if "gpt-5.2-pro" in model:
-                    api_params["store"] = True
-                else:
-                    effort_map = {"shallow": "low", "medium": "medium", "deep": "high"}
-                    verbosity_map = {"shallow": "low", "medium": "medium", "deep": "high"}
-                    api_params["reasoning"] = {"effort": effort_map.get(depth_key, "medium")}
-                    api_params["verbosity"] = verbosity_map.get(depth_key, "medium")
-            elif is_gpt5:
-                # GPT-5 uses "developer" role - optimized for speed
-                api_params = {
-                    "model": model,
-                    "input": [
-                        {
-                            "role": "developer",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": "You are a financial research assistant with web search access. Use real-time web search to provide focused social media sentiment analysis and recent news about the specified ticker. Prioritize speed and key insights."
-                                }
-                            ]
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": user_message
-                                }
-                            ]
-                        }
-                    ],
-                    "text": {"format": {"type": "text"}, "verbosity": "low"},
-                    "reasoning": {"effort": "low", "summary": "auto"},
-                    "tools": [{
-                        "type": "web_search",
-                        "user_location": {"type": "approximate"},
-                        "search_context_size": "low"
-                    }],
-                    "store": True,
-                    "include": ["web_search_call.action.sources"]
-                }
-            elif is_gpt41:
-                # GPT-4.1 uses "system" role  
-                api_params = {
-                    "model": model,
-                    "input": [
-                        {
-                            "role": "system",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": "You are a financial research assistant with web search access. Use real-time web search to provide comprehensive social media sentiment analysis and recent news about the specified stock ticker. Focus on sentiment trends, key discussions, and any notable developments."
-                                }
-                            ]
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": user_message
-                                }
-                            ]
-                        }
-                    ],
-                    "text": {"format": {"type": "text"}},
-                    "reasoning": {},
-                    "tools": [{
-                        "type": "web_search",
-                        "user_location": {"type": "approximate"},
-                        "search_context_size": search_context
-                    }],
-                    "store": True,
-                    "include": ["web_search_call.action.sources"]
-                }
-                api_params.update(model_params)  # Add temperature, max_output_tokens, top_p
-            
-            response = client.responses.create(**api_params)
+            api_params = _build_web_search_response_params(
+                model=model,
+                developer_message=(
+                    "You are a financial research assistant with web search access. "
+                    "Use real-time web search to provide focused social media sentiment "
+                    "analysis and recent news about the specified ticker. Prioritize speed "
+                    "and key insights."
+                ),
+                user_message=user_message,
+                search_context=search_context,
+                max_output_tokens=max_output_tokens,
+                store_responses=store_responses,
+                model_params=model_params,
+            )
+            response = _create_response_with_output_cap_fallback(client, api_params)
         else:
             # Use standard chat completions API for GPT-4 and other models
+            chat_model_params = get_model_params(model, max_tokens_value=max_output_tokens)
             response = client.chat.completions.create(
                 model=model,
                 messages=[
@@ -883,35 +1214,17 @@ def get_stock_news_openai(ticker, curr_date):
                                  f"5. Summary table with key metrics"
                     }
                 ],
-                **model_params
+                **chat_model_params
             )
 
-        # Parse response based on API type
-        if is_gpt5 or is_gpt52 or is_gpt41:
-            # Extract content from GPT-5/GPT-5.2 responses.create() structure
-            content = None
-            if hasattr(response, 'output_text') and response.output_text:
-                content = response.output_text
-            elif hasattr(response, 'output') and response.output:
-                # Navigate through output array to find text content
-                for item in response.output:
-                    if hasattr(item, 'content') and item.content:
-                        for content_item in item.content:
-                            if hasattr(content_item, 'text'):
-                                content = content_item.text
-                                break
-                        if content:
-                            break
-                if not content:
-                    content = str(response.output)
-            else:
-                content = str(response)
-        else:
-            content = response.choices[0].message.content  # Standard chat.completions.create() structure
+        content = _strip_trailing_interactive_followup(extract_responses_text(response))
         
         # Check if content is empty
         if not content or content.strip() == "":
-            return f"Error: Empty response from model {model}. This may indicate the model used all tokens for reasoning."
+            return _build_empty_openai_stock_news_fallback(
+                ticker=ticker_info["alpaca_format"],
+                curr_date=curr_date,
+            )
         
         return content
     except Exception as e:
@@ -921,7 +1234,14 @@ def get_stock_news_openai(ticker, curr_date):
             display_ticker = normalize_ticker_for_logs(ticker)
         except:
             pass
-        return f"Error fetching social media analysis for {display_ticker}: {str(e)}"
+        fallback = _build_empty_openai_stock_news_fallback(
+            ticker=display_ticker,
+            curr_date=curr_date,
+        )
+        return (
+            f"OpenAI stock-news call failed for {display_ticker}: {str(e)}\n\n"
+            f"{fallback}"
+        )
 
 
 def get_global_news_openai(curr_date, ticker_context=None):
@@ -932,13 +1252,13 @@ def get_global_news_openai(curr_date, ticker_context=None):
     
     try:
         config = get_config()
-        timeout_seconds = float(config.get("global_news_timeout_seconds", 240))
+        timeout_seconds = float(config.get("global_news_timeout_seconds", 150))
 
         # Use client with timeout for web search operations
         client = get_openai_client_with_timeout(api_key, timeout_seconds=timeout_seconds)
         
         # Get the selected quick model from config
-        model = config.get("quick_think_llm", "gpt-4o-mini")  # fallback to default
+        model = config.get("quick_think_llm", "gpt-5.4-nano")  # fallback to default
         
         # Research depth controls prompt scope/search context; global news uses a tuned fast profile.
         research_depth = config.get("research_depth", "Medium")
@@ -946,8 +1266,6 @@ def get_global_news_openai(curr_date, ticker_context=None):
         fast_profile = _coerce_bool(config.get("global_news_fast_profile", True))
         profile = get_global_news_profile_for_depth(research_depth, fast_profile=fast_profile)
         search_context = profile["search_context"]
-        depth_effort = profile["effort"]
-        depth_verbosity = profile["verbosity"]
         max_events = int(config.get("global_news_max_events", 8))
         word_budget_default = 550 if depth_key in ("shallow", "medium") else 700
         word_budget = int(config.get("global_news_word_budget", word_budget_default))
@@ -956,23 +1274,18 @@ def get_global_news_openai(curr_date, ticker_context=None):
         lookback_days = int(profile["lookback_days"])
         start_date = (datetime.strptime(curr_date, "%Y-%m-%d") - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
-        # Get model-specific parameters
         max_output_tokens = int(config.get("global_news_max_output_tokens", 1800))
-        model_params = get_model_params(model, max_tokens_value=max_output_tokens)
-        
-        # Check if this is a GPT-5/GPT-5.2 or GPT-4.1 model (both use responses.create())
-        gpt5_models = ["gpt-5", "gpt-5-mini", "gpt-5-nano"]
-        gpt52_models = ["gpt-5.2", "gpt-5.2-pro"]
-        gpt41_models = ["gpt-4.1"]
-        is_gpt5 = any(model_prefix in model for model_prefix in gpt5_models)
-        is_gpt52 = any(model_prefix in model for model_prefix in gpt52_models)
-        is_gpt41 = any(model_prefix in model for model_prefix in gpt41_models)
+        store_responses = _coerce_bool(config.get("openai_store_responses", False))
+        model_params = _quick_model_params_for_tool(
+            model,
+            config,
+            max_output_tokens=max_output_tokens,
+            store_responses=store_responses,
+        )
         
         # Determine if this is crypto-related analysis
         is_crypto = ticker_context and ("/" in ticker_context or "USD" in ticker_context.upper() or "BTC" in ticker_context.upper() or "ETH" in ticker_context.upper())
         target = ticker_context if ticker_context else ("crypto markets" if is_crypto else "financial markets")
-        store_responses = _coerce_bool(config.get("openai_store_responses", False))
-
         if is_crypto:
             focus_points = [
                 "Major crypto regulation, CBDC, or enforcement updates",
@@ -1010,132 +1323,20 @@ def get_global_news_openai(curr_date, ticker_context=None):
             "Write directly in final form and avoid interactive follow-up prompts."
         )
         
-        if is_gpt5 or is_gpt52 or is_gpt41:
-            # Use responses.create() API with web search capabilities
-            # Base parameters for responses.create()
-            if is_gpt52:
-                # GPT-5.2 uses "developer" role with specific parameters
-                api_params = {
-                    "model": model,
-                    "input": [
-                        {
-                            "role": "developer",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": developer_message
-                                }
-                            ]
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": user_message
-                                }
-                            ]
-                        }
-                    ],
-                    "text": {"format": {"type": "text"}},
-                    "tools": [{
-                        "type": "web_search",
-                        "user_location": {"type": "approximate"},
-                        "search_context_size": search_context
-                    }],
-                    "max_output_tokens": max_output_tokens,
-                    "include": ["web_search_call.action.sources"]
-                }
-                # Apply GPT-5.2 specific parameters
-                api_params["summary"] = "auto"
-                if "gpt-5.2-pro" in model:
-                    api_params["store"] = store_responses
-                else:
-                    api_params["reasoning"] = {"effort": depth_effort}
-                    api_params["verbosity"] = depth_verbosity
-            elif is_gpt5:
-                # GPT-5 uses "developer" role
-                api_params = {
-                    "model": model,
-                    "input": [
-                        {
-                            "role": "developer",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": developer_message
-                                }
-                            ]
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": user_message
-                                }
-                            ]
-                        }
-                    ],
-                    "text": {"format": {"type": "text"}, "verbosity": depth_verbosity},
-                    "reasoning": {"effort": depth_effort},
-                    "tools": [{
-                        "type": "web_search",
-                        "user_location": {"type": "approximate"},
-                        "search_context_size": search_context
-                    }],
-                    "max_output_tokens": max_output_tokens,
-                    "store": store_responses,
-                    "include": ["web_search_call.action.sources"]
-                }
-            elif is_gpt41:
-                # GPT-4.1 uses "system" role  
-                api_params = {
-                    "model": model,
-                    "input": [
-                        {
-                            "role": "system",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": developer_message
-                                }
-                            ]
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": user_message
-                                }
-                            ]
-                        }
-                    ],
-                    "text": {"format": {"type": "text"}},
-                    "reasoning": {},
-                    "tools": [{
-                        "type": "web_search",
-                        "user_location": {"type": "approximate"},
-                        "search_context_size": search_context
-                    }],
-                    "store": store_responses,
-                    "include": ["web_search_call.action.sources"]
-                }
-                api_params.update(model_params)  # Add temperature, max_output_tokens, top_p
-            
-            try:
-                response = client.responses.create(**api_params)
-            except Exception as output_cap_error:
-                # Some model/provider combos may reject max_output_tokens in responses API.
-                if "max_output_tokens" in api_params and "max_output_tokens" in str(output_cap_error):
-                    fallback_params = dict(api_params)
-                    fallback_params.pop("max_output_tokens", None)
-                    response = client.responses.create(**fallback_params)
-                else:
-                    raise
+        if _uses_responses_for_web_search(model):
+            api_params = _build_web_search_response_params(
+                model=model,
+                developer_message=developer_message,
+                user_message=user_message,
+                search_context=search_context,
+                max_output_tokens=max_output_tokens,
+                store_responses=store_responses,
+                model_params=model_params,
+            )
+            response = _create_response_with_output_cap_fallback(client, api_params)
         else:
             # Use standard chat completions API for GPT-4 and other models
+            chat_model_params = get_model_params(model, max_tokens_value=max_output_tokens)
             response = client.chat.completions.create(
                 model=model,
                 messages=[
@@ -1148,41 +1349,27 @@ def get_global_news_openai(curr_date, ticker_context=None):
                         "content": user_message
                     }
                 ],
-                **model_params
+                **chat_model_params
             )
 
-        # Parse response based on API type
-        if is_gpt5 or is_gpt52 or is_gpt41:
-            # Extract content from GPT-5/GPT-5.2 responses.create() structure
-            content = None
-            if hasattr(response, 'output_text') and response.output_text:
-                content = response.output_text
-            elif hasattr(response, 'output') and response.output:
-                # Navigate through output array to find text content
-                for item in response.output:
-                    if hasattr(item, 'content') and item.content:
-                        for content_item in item.content:
-                            if hasattr(content_item, 'text'):
-                                content = content_item.text
-                                break
-                        if content:
-                            break
-                if not content:
-                    content = str(response.output)
-            else:
-                content = str(response)
-        else:
-            content = response.choices[0].message.content  # Standard chat.completions.create() structure
+        content = extract_responses_text(response)
 
         content = _strip_trailing_interactive_followup(content)
         
         # Check if content is empty
         if not content or content.strip() == "":
-            return f"Error: Empty response from model {model}. This may indicate the model used all tokens for reasoning."
+            return _build_empty_openai_global_fallback(
+                curr_date=curr_date,
+                ticker_context=ticker_context,
+            )
         
         return content
     except Exception as e:
-        return f"Error fetching global news analysis: {str(e)}"
+        fallback = _build_empty_openai_global_fallback(
+            curr_date=curr_date,
+            ticker_context=ticker_context,
+        )
+        return f"OpenAI global-news call failed: {str(e)}\n\n{fallback}"
 
 
 def get_fundamentals_openai(ticker, curr_date):
@@ -1192,32 +1379,34 @@ def get_fundamentals_openai(ticker, curr_date):
         return f"Error: OpenAI API key not found. Please set OPENAI_API_KEY environment variable."
     
     try:
-        # Use client with timeout for web search operations
-        client = get_openai_client_with_timeout(api_key)
-        
-        # Get the selected quick model from config
         config = get_config()
-        model = config.get("quick_think_llm", "gpt-4o-mini")  # fallback to default
+        timeout_seconds = float(config.get("fundamentals_timeout_seconds", 120))
+        max_output_tokens = int(config.get("fundamentals_max_output_tokens", 1000))
+        store_responses = _coerce_bool(config.get("openai_store_responses", False))
+
+        # Use client with timeout for web search operations
+        client = get_openai_client_with_timeout(api_key, timeout_seconds=timeout_seconds)
+
+        # Get the selected quick model from config
+        model = config.get("quick_think_llm", "gpt-5.4-nano")  # fallback to default
         
-        # Get search context size and LLM params based on research depth
-        search_context = get_search_context_for_depth()
-        depth_params = get_llm_params_for_depth()
+        fundamentals_fast_profile = _coerce_bool(config.get("fundamentals_fast_profile", True))
+        if fundamentals_fast_profile:
+            search_context = "low"
+        else:
+            search_context = get_search_context_for_depth()
         
         from datetime import datetime, timedelta
         start_date = (datetime.strptime(curr_date, "%Y-%m-%d") - timedelta(days=30)).strftime("%Y-%m-%d")
 
-        # Get model-specific parameters
-        model_params = get_model_params(model)
-        
-        # Check if this is a GPT-5/GPT-5.2 or GPT-4.1 model (both use responses.create())
-        gpt5_models = ["gpt-5", "gpt-5-mini", "gpt-5-nano"]
-        gpt52_models = ["gpt-5.2", "gpt-5.2-pro"]
-        gpt41_models = ["gpt-4.1"]
-        is_gpt5 = any(model_prefix in model for model_prefix in gpt5_models)
-        is_gpt52 = any(model_prefix in model for model_prefix in gpt52_models)
-        is_gpt41 = any(model_prefix in model for model_prefix in gpt41_models)
-        
-        if is_gpt5 or is_gpt52 or is_gpt41:
+        model_params = _quick_model_params_for_tool(
+            model,
+            config,
+            max_output_tokens=max_output_tokens,
+            store_responses=store_responses,
+        )
+
+        if _uses_responses_for_web_search(model):
             # Use responses.create() API with web search capabilities
             # Concise, swing-trading-focused prompt that avoids verbose multi-section output
             user_message = (
@@ -1231,7 +1420,7 @@ def get_fundamentals_openai(ticker, curr_date):
                 f"4. Recent catalysts (earnings, leadership changes, M&A, etc.)\n"
                 f"5. Key risk for the next 2-10 days\n\n"
                 f"End with a compact summary table of key metrics.\n"
-                f"Keep total response under 800 words."
+                f"Keep total response under 520 words."
             )
             
             system_text = (
@@ -1239,120 +1428,20 @@ def get_fundamentals_openai(ticker, curr_date):
                 "Use web search to find the latest financials but keep your output SHORT and actionable. "
                 "Do not write long essays — be direct and data-driven."
             )
-            
-            # Base parameters for responses.create()
-            if is_gpt52:
-                # GPT-5.2 uses "developer" role with specific parameters
-                api_params = {
-                    "model": model,
-                    "input": [
-                        {
-                            "role": "developer",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": system_text
-                                }
-                            ]
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": user_message
-                                }
-                            ]
-                        }
-                    ],
-                    "text": {"format": {"type": "text"}},
-                    "tools": [{
-                        "type": "web_search",
-                        "user_location": {"type": "approximate"},
-                        "search_context_size": search_context
-                    }],
-                    "include": ["web_search_call.action.sources"]
-                }
-                # Apply depth-aware parameters
-                api_params["summary"] = "auto"
-                if "gpt-5.2-pro" in model:
-                    api_params["store"] = True
-                else:
-                    api_params["reasoning"] = {"effort": depth_params["effort"]}
-                    api_params["verbosity"] = depth_params["verbosity"]
-            elif is_gpt5:
-                # GPT-5 uses "developer" role
-                api_params = {
-                    "model": model,
-                    "input": [
-                        {
-                            "role": "developer",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": system_text
-                                }
-                            ]
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": user_message
-                                }
-                            ]
-                        }
-                    ],
-                    "text": {"format": {"type": "text"}, "verbosity": depth_params["verbosity"]},
-                    "reasoning": {"effort": depth_params["effort"], "summary": "auto"},
-                    "tools": [{
-                        "type": "web_search",
-                        "user_location": {"type": "approximate"},
-                        "search_context_size": search_context
-                    }],
-                    "store": True,
-                    "include": ["reasoning.encrypted_content", "web_search_call.action.sources"]
-                }
-            elif is_gpt41:
-                # GPT-4.1 uses "system" role  
-                api_params = {
-                    "model": model,
-                    "input": [
-                        {
-                            "role": "system",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": system_text
-                                }
-                            ]
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": user_message
-                                }
-                            ]
-                        }
-                    ],
-                    "text": {"format": {"type": "text"}},
-                    "reasoning": {},
-                    "tools": [{
-                        "type": "web_search",
-                        "user_location": {"type": "approximate"},
-                        "search_context_size": search_context
-                    }],
-                    "store": True,
-                    "include": ["web_search_call.action.sources"]
-                }
-                api_params.update(model_params)  # Add temperature, max_output_tokens, top_p
-            
-            response = client.responses.create(**api_params)
+            api_params = _build_web_search_response_params(
+                model=model,
+                developer_message=system_text,
+                user_message=user_message,
+                search_context=search_context,
+                max_output_tokens=max_output_tokens,
+                store_responses=store_responses,
+                model_params=model_params,
+                include_reasoning=True,
+            )
+            response = _create_response_with_output_cap_fallback(client, api_params)
         else:
             # Use standard chat completions API for GPT-4 and other models
+            chat_model_params = get_model_params(model, max_tokens_value=max_output_tokens)
             response = client.chat.completions.create(
                 model=model,
                 messages=[
@@ -1374,35 +1463,23 @@ def get_fundamentals_openai(ticker, curr_date):
                                  f"Format the analysis professionally with clear sections and include a summary table at the end."
                     }
                 ],
-                **model_params
+                **chat_model_params
             )
 
-        # Parse response based on API type
-        if is_gpt5 or is_gpt52 or is_gpt41:
-            # Extract content from GPT-5/GPT-5.2 responses.create() structure
-            content = None
-            if hasattr(response, 'output_text') and response.output_text:
-                content = response.output_text
-            elif hasattr(response, 'output') and response.output:
-                # Navigate through output array to find text content
-                for item in response.output:
-                    if hasattr(item, 'content') and item.content:
-                        for content_item in item.content:
-                            if hasattr(content_item, 'text'):
-                                content = content_item.text
-                                break
-                        if content:
-                            break
-                if not content:
-                    content = str(response.output)
-            else:
-                content = str(response)
-        else:
-            content = response.choices[0].message.content  # Standard chat.completions.create() structure
-        
+        content = _strip_trailing_interactive_followup(extract_responses_text(response))
+        if not content or not content.strip():
+            return _build_empty_openai_fundamentals_fallback(
+                ticker=ticker,
+                curr_date=curr_date,
+            )
+
         return content
     except Exception as e:
-        return f"Error fetching fundamental analysis for {ticker}: {str(e)}"
+        fallback = _build_empty_openai_fundamentals_fallback(
+            ticker=ticker,
+            curr_date=curr_date,
+        )
+        return f"OpenAI fundamentals call failed for {ticker}: {str(e)}\n\n{fallback}"
 
 
 def get_defillama_fundamentals(

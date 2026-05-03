@@ -566,7 +566,7 @@ class GraphSetup:
         research_manager_node = self._wrap_node_with_run_logging(
             "Research Manager",
             create_research_manager(
-                self.deep_thinking_llm, self.invest_judge_memory
+                self.deep_thinking_llm, self.invest_judge_memory, self.config
             ),
         )
         trader_node = self._wrap_node_with_run_logging(
@@ -736,4 +736,4 @@ class GraphSetup:
         )
         workflow.add_edge("Risk Judge", END)
 
-        return workflow.compile()
+        return workflow

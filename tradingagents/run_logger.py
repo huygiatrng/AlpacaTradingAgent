@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -45,6 +46,74 @@ class RunAuditLogger:
         self._lock = threading.RLock()
         self._active_runs_by_symbol: Dict[str, str] = {}
         self._active_runs: Dict[str, Dict[str, Any]] = {}
+        self._recover_stale_running_logs()
+        atexit.register(self._close_active_runs_on_exit)
+
+    def _recover_stale_running_logs(self) -> None:
+        """Mark stale on-disk runs as aborted if they were left in running state."""
+        root = Path("eval_results")
+        if not root.exists():
+            return
+
+        recovered = 0
+        for path in root.glob("*/TradingAgentsStrategy_logs/runs/*.json"):
+            try:
+                with path.open("r", encoding="utf-8") as f:
+                    payload = json.load(f)
+            except Exception:
+                continue
+
+            if payload.get("status") != "running" or payload.get("ended_at"):
+                continue
+
+            payload["status"] = "aborted"
+            payload["ended_at"] = _utc_now_iso()
+            summary = payload.setdefault("summary", {})
+            if not summary.get("error_message"):
+                summary["error_message"] = (
+                    "Recovered stale running log after process termination."
+                )
+            summary["error_events"] = int(summary.get("error_events", 0) or 0) + 1
+
+            try:
+                with path.open("w", encoding="utf-8") as f:
+                    json.dump(payload, f, indent=2, ensure_ascii=False)
+                recovered += 1
+            except Exception:
+                continue
+
+        if recovered:
+            print(f"[RUN_LOG] Recovered {recovered} stale running log(s)")
+
+    def _close_active_runs_on_exit(self) -> None:
+        """Best-effort closure for in-flight runs when process exits unexpectedly."""
+        try:
+            with self._lock:
+                if not self._active_runs:
+                    return
+
+                for run_id, run_data in list(self._active_runs.items()):
+                    if run_data.get("ended_at"):
+                        continue
+
+                    run_data["ended_at"] = _utc_now_iso()
+                    if run_data.get("status") == "running":
+                        run_data["status"] = "aborted"
+
+                    summary = run_data.setdefault("summary", {})
+                    if not summary.get("error_message"):
+                        summary["error_message"] = (
+                            "Run terminated before finish_run was called (process exit/termination)."
+                        )
+                    summary["error_events"] = int(summary.get("error_events", 0) or 0) + 1
+
+                    self._flush_unlocked(run_id)
+
+                self._active_runs.clear()
+                self._active_runs_by_symbol.clear()
+        except Exception:
+            # Exit handlers must never raise.
+            return
 
     def start_run(
         self,

@@ -143,6 +143,61 @@ def get_openai_api_key() -> str:
     return get_api_key("openai_api_key", "OPENAI_API_KEY")
 
 
+def get_google_api_key() -> str:
+    return get_api_key("google_api_key", "GOOGLE_API_KEY")
+
+
+def get_anthropic_api_key() -> str:
+    return get_api_key("anthropic_api_key", "ANTHROPIC_API_KEY")
+
+
+def get_xai_api_key() -> str:
+    return get_api_key("xai_api_key", "XAI_API_KEY")
+
+
+def get_deepseek_api_key() -> str:
+    return get_api_key("deepseek_api_key", "DEEPSEEK_API_KEY")
+
+
+def get_dashscope_api_key() -> str:
+    return get_api_key("dashscope_api_key", "DASHSCOPE_API_KEY")
+
+
+def get_zhipu_api_key() -> str:
+    return get_api_key("zhipu_api_key", "ZHIPU_API_KEY")
+
+
+def get_openrouter_api_key() -> str:
+    return get_api_key("openrouter_api_key", "OPENROUTER_API_KEY")
+
+
+def get_azure_openai_api_key() -> str:
+    return get_api_key("azure_openai_api_key", "AZURE_OPENAI_API_KEY")
+
+
+def get_alpha_vantage_api_key() -> str:
+    return get_api_key("alpha_vantage_api_key", "ALPHA_VANTAGE_API_KEY")
+
+
+def get_llm_api_key(provider: str) -> str:
+    provider_key = (provider or "openai").lower()
+    if provider_key == "local_openai":
+        return get_openai_api_key() or "local-llm"
+    mapping = {
+        "openai": get_openai_api_key,
+        "google": get_google_api_key,
+        "anthropic": get_anthropic_api_key,
+        "xai": get_xai_api_key,
+        "deepseek": get_deepseek_api_key,
+        "qwen": get_dashscope_api_key,
+        "glm": get_zhipu_api_key,
+        "openrouter": get_openrouter_api_key,
+        "azure": get_azure_openai_api_key,
+    }
+    getter = mapping.get(provider_key)
+    return getter() if getter else ""
+
+
 def get_finnhub_api_key() -> str:
     """Get Finnhub API key from runtime, environment variables, or config."""
     return get_api_key("finnhub_api_key", "FINNHUB_API_KEY")

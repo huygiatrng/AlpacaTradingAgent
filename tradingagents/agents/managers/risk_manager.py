@@ -1,15 +1,18 @@
 import time
 import json
+from ..schemas import RiskDecision, render_risk_decision
 from ..utils.agent_trading_modes import (
+    ensure_final_transaction_proposal,
     get_trading_mode_context,
     get_agent_specific_context,
     extract_recommendation,
-    format_final_decision,
 )
+from ..utils.memory import TradingMemoryLog
 from ..utils.report_context import (
     get_agent_context_bundle,
     build_debate_digest,
 )
+from ..utils.structured import bind_structured, invoke_structured_or_freetext
 from tradingagents.dataflows.alpaca_utils import AlpacaUtils
 
 # Import prompt capture utility
@@ -22,6 +25,9 @@ except ImportError:
 
 
 def create_risk_manager(llm, memory, config=None):
+    structured_llm = bind_structured(llm, RiskDecision, "Risk Manager")
+    decision_log = TradingMemoryLog(config)
+
     def risk_manager_node(state) -> dict:
 
         company_name = state["company_of_interest"]
@@ -95,6 +101,7 @@ def create_risk_manager(llm, memory, config=None):
         mode_name = trading_context["mode_name"]
         decision_format = trading_context["decision_format"]
         final_format = trading_context["final_format"]
+        output_language = (config or {}).get("output_language", "English")
         context_bundle = get_agent_context_bundle(
             state,
             agent_role="risk_manager",
@@ -114,6 +121,7 @@ def create_risk_manager(llm, memory, config=None):
         past_memory_str = ""
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
+        decision_memory_str = decision_log.get_past_context(company_name)
 
         prompt = f"""{agent_context}
 
@@ -129,6 +137,7 @@ Inputs:
 - Risk debate digest: {risk_debate_digest}
 - Full risk debate history: {history}
 - Past lessons: {past_memory_str}
+- Persistent decision lessons: {decision_memory_str}
 
 Decision constraints:
 1. Reject proposals implying >3% account risk or unclear exits.
@@ -139,25 +148,33 @@ Output format (concise):
 - Recommendation: {actions} (with confidence high/medium/low)
 - 4-6 concise bullets explaining risk rationale and required risk controls
 - End exactly with: {final_format}
+- Write the analysis in {output_language}; keep the final transaction proposal line in English with the exact action token.
 
 Keep response under 260 words."""
 
         # Capture the COMPLETE prompt that gets sent to the LLM
         capture_agent_prompt("final_trade_decision", prompt, company_name)
 
-        response = llm.invoke(prompt)
+        response_content = invoke_structured_or_freetext(
+            structured_llm,
+            llm,
+            prompt,
+            render_risk_decision,
+            "Risk Manager",
+        )
 
         # Extract the recommendation from the response
         trading_mode = trading_context["mode"]
-        extracted_recommendation = extract_recommendation(response.content, trading_mode)
+        extracted_recommendation = extract_recommendation(response_content, trading_mode)
+        if not extracted_recommendation:
+            extracted_recommendation = "NEUTRAL" if trading_mode == "trading" else "HOLD"
         
-        # Format the final decision if extraction was successful
-        final_decision_content = response.content
-        if extracted_recommendation:
-            final_decision_content = format_final_decision(extracted_recommendation, trading_mode)
+        final_decision_content = ensure_final_transaction_proposal(
+            response_content, extracted_recommendation, trading_mode
+        )
 
         new_risk_debate_state = {
-            "judge_decision": response.content,
+            "judge_decision": final_decision_content,
             "history": risk_debate_state["history"],
             "risky_history": risk_debate_state["risky_history"],
             "safe_history": risk_debate_state["safe_history"],

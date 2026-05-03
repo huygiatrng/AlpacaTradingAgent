@@ -20,13 +20,30 @@ DEFAULT_SETTINGS = {
     "market_hours_input": "",
     "trade_after_analyze": False,
     "trade_dollar_amount": 4500,
-    "quick_llm": "gpt-5-nano",
-    "deep_llm": "gpt-5-nano"
+    "llm_provider": "openai",
+    "backend_url": "",
+    "output_language": "English",
+    "checkpoint_enabled": False,
+    "quick_llm": "gpt-5.4-nano",
+    "deep_llm": "gpt-5.4-mini",
+    "quick_llm_custom_model": "",
+    "deep_llm_custom_model": "",
+    "google_thinking_level": "",
+    "anthropic_effort": "",
 }
 
 # Default API keys structure (empty by default, loaded from localStorage or .env)
 DEFAULT_API_KEYS = {
     "openai": "",
+    "google": "",
+    "anthropic": "",
+    "xai": "",
+    "deepseek": "",
+    "dashscope": "",
+    "zhipu": "",
+    "openrouter": "",
+    "azure-openai": "",
+    "alpha-vantage": "",
     "alpaca-key": "",
     "alpaca-secret": "",
     "finnhub": "",

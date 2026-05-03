@@ -1,5 +1,6 @@
 from openai import OpenAI
 import httpx
+from typing import Any, List
 
 from .config import get_config
 
@@ -177,3 +178,91 @@ def get_model_params(model_name, max_tokens_value=3000):
         params["max_tokens"] = max_tokens_value
 
     return params
+
+
+def extract_responses_text(response: Any) -> str:
+    """
+    Robustly extract plain text from OpenAI responses.create() objects.
+    Falls back to chat.completions content when available.
+    """
+    if response is None:
+        return ""
+
+    # Preferred fast path for newer SDKs.
+    output_text = getattr(response, "output_text", None)
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text.strip()
+
+    collected: List[str] = []
+
+    def _append_text(value: Any) -> None:
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                collected.append(text)
+
+    def _walk(node: Any) -> None:
+        if node is None:
+            return
+
+        if isinstance(node, str):
+            _append_text(node)
+            return
+
+        if isinstance(node, list):
+            for item in node:
+                _walk(item)
+            return
+
+        if isinstance(node, dict):
+            node_type = str(node.get("type", "")).lower()
+            if node_type in ("output_text", "text", "input_text"):
+                _append_text(node.get("text") or node.get("value"))
+
+            # Common nesting keys in SDK responses.
+            if "content" in node:
+                _walk(node.get("content"))
+            if "output" in node:
+                _walk(node.get("output"))
+            if "message" in node:
+                _walk(node.get("message"))
+            return
+
+        # SDK object-like nodes.
+        node_type = str(getattr(node, "type", "")).lower()
+        if node_type in ("output_text", "text", "input_text"):
+            _append_text(getattr(node, "text", None) or getattr(node, "value", None))
+
+        content = getattr(node, "content", None)
+        if content is not None:
+            _walk(content)
+
+        output = getattr(node, "output", None)
+        if output is not None:
+            _walk(output)
+
+        message = getattr(node, "message", None)
+        if message is not None:
+            _walk(message)
+
+    # Try responses.create() shape first.
+    _walk(getattr(response, "output", None))
+
+    # Fallback for chat.completions shape.
+    if not collected and hasattr(response, "choices"):
+        try:
+            choice_content = response.choices[0].message.content
+            _append_text(choice_content)
+        except Exception:
+            pass
+
+    deduped: List[str] = []
+    seen = set()
+    for chunk in collected:
+        key = chunk.strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(key)
+
+    return "\n".join(deduped).strip()

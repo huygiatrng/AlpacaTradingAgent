@@ -26,7 +26,7 @@ AlpacaTradingAgent introduces powerful new capabilities specifically designed fo
 - **Multi-Asset Analysis**: Analyze both traditional stocks and cryptocurrencies in a single session
 - **Crypto Format**: Use proper crypto format (e.g., `BTC/USD`, `ETH/USD`) for cryptocurrency analysis
 - **Mixed Portfolios**: Support for mixed symbol inputs like `"NVDA, ETH/USD, AAPL"` for diversified analysis
-- **Dedicated Data Sources**: Coindesk API for crypto news and DeFi Llama for fundamental crypto data
+- **Dedicated Data Sources**: CoinDesk/CryptoCompare-compatible crypto news and DeFi Llama for fundamental crypto data
 
 ### 🤖 **Enhanced Multi-Agent System (5 Agents)**
 - **Market Analyst**: Evaluates overall market conditions and trends
@@ -35,6 +35,20 @@ AlpacaTradingAgent introduces powerful new capabilities specifically designed fo
 - **Fundamental Analyst**: Assesses company financials and intrinsic value
 - **Macro Analyst**: Analyzes macroeconomic indicators and Federal Reserve data
 - **Parallel Execution**: All 5 analysts run simultaneously for faster analysis with configurable delays to prevent API overload
+
+### 🧠 **Multi-Provider LLM Runtime**
+- **Default OpenAI GPT-5.4 Path**: Uses `gpt-5.4-nano` for quick agents and `gpt-5.4-mini` for deeper manager/trader agents
+- **Provider Choice**: Supports OpenAI, local OpenAI-compatible endpoints, Google Gemini, Anthropic Claude, xAI, DeepSeek, Qwen, GLM, OpenRouter, Ollama, and Azure OpenAI
+- **Provider-Specific Controls**: Preserves GPT reasoning controls, Gemini thinking level, Claude effort, custom model IDs, and Azure deployment names
+- **Local Compatibility**: `OPENAI_USE_LOCAL` and `OPENAI_BASE_URL` continue to route core LLM calls to a local OpenAI-compatible backend
+
+### 🧾 **Structured Decisions, Memory, and Resume**
+- **Executable Final Action**: Final decisions preserve `BUY/HOLD/SELL` or `LONG/NEUTRAL/SHORT` for Alpaca execution
+- **Advisory Ratings**: Upstream-style ratings are treated as metadata only and never directly trigger Alpaca orders
+- **Structured Output Fallback**: Research Manager, Trader, and Risk Manager use structured schemas where supported and gracefully retry as free text otherwise
+- **Persistent Decision Log**: Completed decisions are written to a markdown memory log and later resolved with realized returns and reflections
+- **Checkpoint Resume**: Optional per-symbol SQLite checkpoints allow failed LangGraph runs to resume while successful runs clean up automatically
+- **Safe Paths**: Report, cache, checkpoint, and log paths use safe ticker components, including crypto symbols like `BTC/USD -> BTC_USD`
 
 ### ⚡ **Automated Trading & Scheduling**
 - **Market Hours Trading**: Automatic execution during market hours
@@ -49,6 +63,7 @@ AlpacaTradingAgent introduces powerful new capabilities specifically designed fo
 - **Tabbed Reports**: Organized analysis reports with easy navigation
 - **Chat-Style Debates**: Visualize agent debates as conversation threads
 - **Position Management**: View current positions, recent orders, and liquidate positions directly from UI
+- **Model Configuration**: Choose provider, model, provider-specific parameters, output language, and checkpoint resume from the UI
 
 ## Complete Guide
 
@@ -70,7 +85,7 @@ Our enhanced framework decomposes complex trading tasks into specialized roles w
 
 ### Enhanced Analyst Team (5 Agents)
 - **Market Analyst**: Evaluates overall market conditions, sector trends, and market sentiment indicators
-- **Social Sentiment Analyst**: Analyzes Twitter, Reddit, and other social platforms to gauge market sentiment and momentum
+- **Social Sentiment Analyst**: Analyzes Reddit, OpenAI web-search sentiment, and public market narratives
 - **News Analyst**: Monitors financial news, earnings announcements, and global events that impact markets
 - **Fundamental Analyst**: Evaluates company financials, earnings reports, and intrinsic value calculations
 - **Macro Analyst**: Analyzes Federal Reserve data, economic indicators, and macroeconomic trends using FRED API
@@ -117,8 +132,23 @@ For full functionality including real-time trading, you'll need to set up the fo
   - Set `ALPACA_USE_PAPER=True` for paper trading (recommended for testing)
   - Set `ALPACA_USE_PAPER=False` for live trading with real money
 
-- **OpenAI API Key** (Required for LLM agents):
+- **OpenAI API Key** (Default LLM provider and OpenAI web-search tools):
   - Sign up at [OpenAI Platform](https://platform.openai.com/api-keys)
+  - Default models are `gpt-5.4-nano` and `gpt-5.4-mini`
+
+#### LLM Provider APIs
+Set `LLM_PROVIDER` in `.env`, the CLI, or the WebUI. Supported providers include:
+- **OpenAI**: `OPENAI_API_KEY`
+- **Local OpenAI-compatible**: `OPENAI_USE_LOCAL=true`, `OPENAI_BASE_URL`, optional `OPENAI_API_KEY`
+- **Google Gemini**: `GOOGLE_API_KEY`
+- **Anthropic Claude**: `ANTHROPIC_API_KEY`
+- **xAI Grok**: `XAI_API_KEY`
+- **DeepSeek**: `DEEPSEEK_API_KEY`
+- **Qwen/DashScope**: `DASHSCOPE_API_KEY`
+- **GLM/Zhipu**: `ZHIPU_API_KEY`
+- **OpenRouter**: `OPENROUTER_API_KEY`
+- **Ollama**: no API key by default; configure the backend URL
+- **Azure OpenAI**: `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT_NAME`, `AZURE_OPENAI_API_VERSION`
 
 #### Financial Data APIs
 - **Finnhub API Key** (Required for stock news and data):
@@ -128,13 +158,19 @@ For full functionality including real-time trading, you'll need to set up the fo
   - Get your free key from [FRED](https://fred.stlouisfed.org/docs/api/api_key.html)
 
 #### Crypto Data APIs
-- **CoinDesk API Key** (Required for crypto news):
+- **CoinDesk/CryptoCompare API Key** (Required for crypto news):
   - Sign up at [CryptoCompare](https://www.cryptocompare.com/cryptopian/api-keys)
 
 #### Optional APIs
-- **Twitter Bearer Token** (Optional for enhanced social sentiment):
-  - Get from [Twitter Developer](https://developer.twitter.com/) for API-based sentiment analysis
-  - The system can fallback to web scraping if not provided
+- **Alpha Vantage API Key** (Optional fallback market data):
+  - Get from [Alpha Vantage](https://www.alphavantage.co/support/#api-key)
+  - Fallback routing is optional and does not replace Alpaca as the primary market data path
+
+#### Runtime Paths
+`env.sample` also documents optional runtime paths:
+- `TRADINGAGENTS_RESULTS_DIR` for report output
+- `TRADINGAGENTS_CACHE_DIR` for cache and checkpoint files
+- `TRADINGAGENTS_MEMORY_LOG_PATH` for persistent decision memory
 
 3. **Restart the application** after setting up your API keys.
 
@@ -151,6 +187,7 @@ The CLI now supports multiple symbols and crypto assets:
 - Single stock: `NVDA`
 - Single crypto: `BTC/USD`
 - Multiple mixed assets: `NVDA, ETH/USD, AAPL, BTC/USD`
+- Provider/model selection, custom model IDs, checkpoint resume, and provider-specific settings are available from the CLI prompts.
 
 ### Web UI Usage
 
@@ -218,11 +255,16 @@ The web interface offers comprehensive trading and analysis capabilities:
 - Set custom analysis intervals (every N hours)
 - Margin trading controls and risk management
 
+**LLM and Runtime Controls**
+- Select OpenAI, local OpenAI-compatible, Google, Anthropic, xAI, DeepSeek, Qwen, GLM, OpenRouter, Ollama, or Azure OpenAI
+- Configure custom model IDs for compatible providers and Azure deployment names
+- Tune GPT reasoning controls, Gemini thinking level, Claude effort, output language, and checkpoint resume
+
 ## AlpacaTradingAgent Package
 
 ### Implementation Details
 
-Built with LangGraph for flexibility and modularity. The enhanced version integrates with multiple financial APIs and supports both paper and live trading through Alpaca. We recommend using `gpt-5-mini` for testing to minimize API costs, as the framework makes numerous API calls across all 5 agents.
+Built with LangGraph for flexibility and modularity. The enhanced version integrates with multiple financial APIs and supports both paper and live trading through Alpaca. We recommend `gpt-5-nano` for the cheapest testing runs or `gpt-5.4-nano` for a newer low-cost default, as the framework makes numerous API calls across all 5 agents.
 
 ### Python Usage
 
@@ -252,12 +294,24 @@ from tradingagents.default_config import DEFAULT_CONFIG
 
 # Create custom config for enhanced features
 config = DEFAULT_CONFIG.copy()
-config["deep_think_llm"] = "gpt-5-mini"  # Cost-effective for testing
-config["quick_think_llm"] = "gpt-5-mini"
+config["deep_think_llm"] = "gpt-5.4-mini"  # Balanced current default
+config["quick_think_llm"] = "gpt-5.4-nano"  # New low-cost quick model
+config["quick_llm_params"] = {
+    "reasoning_effort": "low",
+    "text_verbosity": "low",
+    "reasoning_summary": "auto",
+}
+config["deep_llm_params"] = {
+    "reasoning_effort": "medium",
+    "text_verbosity": "medium",
+    "reasoning_summary": "auto",
+}
 config["max_debate_rounds"] = 2  # Increase debate rounds
 config["online_tools"] = True  # Use real-time data
-config["enable_margin_trading"] = True  # Allow short selling
-config["auto_execute_trades"] = False  # Manual approval required
+config["allow_shorts"] = False  # Investment mode: BUY/HOLD/SELL
+config["checkpoint_enabled"] = False  # Enable to resume failed graph runs
+config["memory_log_path"] = "~/.tradingagents/memory/trading_memory.md"
+config["news_global_openai_enabled"] = False  # Macro handles broad global context by default
 
 # Parallel execution settings (to avoid API overload)
 config["parallel_analysts"] = True  # Run analysts in parallel (default: True)
@@ -270,6 +324,20 @@ ta = TradingAgentsGraph(debug=True, config=config)
 
 # Analyze with crypto support
 _, decision = ta.propagate("BTC/USD", "2024-05-10")
+print(decision)
+```
+
+For non-OpenAI providers, switch the provider and model IDs:
+
+```python
+config = DEFAULT_CONFIG.copy()
+config["llm_provider"] = "google"
+config["quick_think_llm"] = "gemini-2.5-flash"
+config["deep_think_llm"] = "gemini-3.1-pro-preview"
+config["google_thinking_level"] = "high"
+
+ta = TradingAgentsGraph(debug=True, config=config)
+_, decision = ta.propagate("NVDA", "2024-05-10")
 print(decision)
 ```
 

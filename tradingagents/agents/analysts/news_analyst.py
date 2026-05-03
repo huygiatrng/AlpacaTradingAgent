@@ -18,37 +18,51 @@ def create_news_analyst(llm, toolkit):
         ticker = state["company_of_interest"]
         
         is_crypto = "/" in ticker or "USD" in ticker.upper() or "USDT" in ticker.upper()
+        openai_available = toolkit.has_openai_web_search()
+        finnhub_available = toolkit.has_finnhub()
+        coindesk_available = toolkit.has_coindesk()
 
-        if toolkit.config["online_tools"]:
-            if is_crypto:
-                tools = [
-                    toolkit.get_global_news_openai,
-                    toolkit.get_google_news,
-                    toolkit.get_coindesk_news,
-                ]
-            else:
-                tools = [
-                    toolkit.get_global_news_openai,
-                    toolkit.get_google_news,
-                    toolkit.get_finnhub_news_recent,
-                ]
+        global_news_available = (
+            toolkit.config["online_tools"]
+            and openai_available
+            and bool(toolkit.config.get("news_global_openai_enabled", False))
+        )
+        tools = [toolkit.get_google_news]
+        if global_news_available:
+            tools.append(toolkit.get_global_news_openai)
+        if is_crypto:
+            if coindesk_available:
+                tools.append(toolkit.get_coindesk_news)
         else:
-            if is_crypto:
-                tools = [
-                    toolkit.get_google_news,
-                    toolkit.get_coindesk_news,
-                ]
-            else:
-                tools = [
-                    toolkit.get_google_news,
-                    toolkit.get_finnhub_news_recent,
-                ]
+            if finnhub_available:
+                tools.append(toolkit.get_finnhub_news_recent)
+
+        source_labels = ["Google News"]
+        if global_news_available:
+            source_labels.append("OpenAI global web search")
+        if is_crypto and coindesk_available:
+            source_labels.append("CoinDesk/CryptoCompare")
+        if (not is_crypto) and finnhub_available:
+            source_labels.append("Finnhub")
+
+        global_news_guidance = (
+            f"**IMPORTANT:** When using get_global_news_openai, ALWAYS pass ticker_context='{ticker}' to get "
+            + (
+                "crypto-relevant global news (regulation, institutional adoption, DeFi developments)"
+                if is_crypto
+                else "sector-relevant global news"
+            )
+            + " instead of generic macro news.\n"
+            if global_news_available
+            else ""
+        )
 
         source_guidance = (
-            " When online tools are enabled, call both OpenAI web search and direct news sources before concluding."
-            " For stocks: use `get_global_news_openai` + `get_google_news` + `get_finnhub_news_recent`."
-            " For crypto: use `get_global_news_openai` + `get_google_news` + `get_coindesk_news`."
+            " Use all currently available news tools before concluding."
+            f" Active sources: {', '.join(source_labels)}."
             " For `get_finnhub_news_recent`, pass ticker and curr_date from context."
+            " Do not request broad macro/global web searches unless OpenAI global web search is listed as an active source;"
+            " the Macro analyst handles that context when enabled."
         )
         system_message = (
             f"You are a SWING TRADING news analyst specializing in identifying news events and market developments that could drive multi-day price movements for {ticker}. Focus on catalysts and sentiment shifts that affect swing trading positions (2-10 day holds)."
@@ -65,7 +79,7 @@ def create_news_analyst(llm, toolkit):
             + "- Assess news impact magnitude (minor <2%, moderate 2-5%, major >5% multi-day moves) \n"
             + "- Consider news durability (will impact persist through the swing period?) \n"
             + "- Analyze market reaction patterns to similar news for multi-day follow-through \n"
-            + f"**IMPORTANT:** When using get_global_news_openai, ALWAYS pass ticker_context='{ticker}' to get {('crypto-relevant global news (regulation, institutional adoption, DeFi developments)' if is_crypto else 'sector-relevant global news')} instead of generic macro news.\n"
+            + global_news_guidance
             + f"{source_guidance}\n"
             + "**AVOID:** Generic market commentary, intraday noise. Focus on news with multi-day impact potential relevant to swing trades.\n"
             + """ Make sure to append a Markdown table at the end organizing:
@@ -87,7 +101,7 @@ Provide specific, actionable news analysis for swing trading decisions with clea
                     " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
                     " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
                     " You have access to the following tools: {tool_names}.\n{system_message}"
-                    "For your reference, the current date is {current_date}. We are looking at the ticekr: {ticker}",
+                    "For your reference, the current date is {current_date}. We are looking at the ticker: {ticker}",
                 ),
                 MessagesPlaceholder(variable_name="messages"),
             ]
@@ -122,16 +136,22 @@ For your reference, the current date is {current_date}. We are looking at the ti
             # Fallback to system message only
             capture_agent_prompt("news_report", system_message, ticker)
 
-        chain = prompt | llm.bind_tools(tools)
+        chain = prompt | (llm.bind_tools(tools) if tools else llm)
         
         # Copy the incoming conversation history so we can append to it when the model makes tool calls
         messages_history = list(state["messages"])
 
         # First LLM response
         result = chain.invoke(messages_history)
+        max_tool_iterations = int(toolkit.config.get("max_tool_iterations_per_agent", 8))
+        max_same_call_repeats = int(toolkit.config.get("max_same_tool_call_repeats", 1))
+        tool_call_counts = {}
+        tool_result_cache = {}
+        iteration_count = 0
 
         # Handle iterative tool calls until the model stops requesting them
-        while getattr(result, "additional_kwargs", {}).get("tool_calls"):
+        while tools and getattr(result, "additional_kwargs", {}).get("tool_calls") and iteration_count < max_tool_iterations:
+            iteration_count += 1
             for tool_call in result.additional_kwargs["tool_calls"]:
                 # Handle different tool call structures
                 if isinstance(tool_call, dict):
@@ -154,15 +174,27 @@ For your reference, the current date is {current_date}. We are looking at the ti
                     tool_result = f"Tool '{tool_name}' not found."
                     print(f"[NEWS] ⚠️ {tool_result}")
                 else:
-                    try:
-                        # LangChain Tool objects expose `.run` (string IO) as well as `.invoke` (dict/kwarg IO)
-                        if hasattr(tool_fn, "invoke"):
-                            tool_result = tool_fn.invoke(tool_args)
-                        else:
-                            tool_result = tool_fn.run(**tool_args)
-                        
-                    except Exception as tool_err:
-                        tool_result = f"Error running tool '{tool_name}': {str(tool_err)}"
+                    call_signature = f"{tool_name}:{json.dumps(tool_args, sort_keys=True, default=str)}"
+                    call_count = tool_call_counts.get(call_signature, 0) + 1
+                    tool_call_counts[call_signature] = call_count
+
+                    if call_signature in tool_result_cache:
+                        tool_result = tool_result_cache[call_signature]
+                    elif call_count > max_same_call_repeats:
+                        tool_result = (
+                            f"Skipped repeated tool call '{tool_name}' with identical arguments "
+                            f"after {max_same_call_repeats} execution(s). Reuse previous evidence."
+                        )
+                    else:
+                        try:
+                            # LangChain Tool objects expose `.run` (string IO) as well as `.invoke` (dict/kwarg IO)
+                            if hasattr(tool_fn, "invoke"):
+                                tool_result = tool_fn.invoke(tool_args)
+                            else:
+                                tool_result = tool_fn.run(**tool_args)
+                            tool_result_cache[call_signature] = str(tool_result)
+                        except Exception as tool_err:
+                            tool_result = f"Error running tool '{tool_name}': {str(tool_err)}"
 
                 # Append the assistant tool call and tool result messages so the LLM can continue the conversation
                 tool_call_id = tool_call.get("id") or tool_call.get("tool_call_id")
@@ -180,6 +212,14 @@ For your reference, the current date is {current_date}. We are looking at the ti
 
             # Ask the LLM to continue with the new context
             result = chain.invoke(messages_history)
+
+        if tools and getattr(result, "additional_kwargs", {}).get("tool_calls"):
+            result = AIMessage(
+                content=(
+                    (result.content or "").strip()
+                    + f"\n\nTool-loop halted after {max_tool_iterations} iterations to prevent endless retries."
+                ).strip()
+            )
         
         # Check if the result already contains FINAL TRANSACTION PROPOSAL
         if "FINAL TRANSACTION PROPOSAL:" not in result.content:

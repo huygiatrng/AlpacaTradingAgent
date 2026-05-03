@@ -5,8 +5,24 @@ from typing import Annotated, Callable, Any, Optional
 from pandas import DataFrame
 import pandas as pd
 from functools import wraps
+import time
 
 from .utils import save_output, SavePathType, decorate_all_methods
+
+
+def _history_with_retry(ticker, *, start: str, end: str, attempts: int = 3) -> DataFrame:
+    last_error = None
+    for attempt in range(attempts):
+        try:
+            data = ticker.history(start=start, end=end, auto_adjust=False)
+            if data is not None and not data.empty and "Close" in data.columns:
+                return data
+            last_error = ValueError("empty or malformed yfinance history")
+        except Exception as exc:
+            last_error = exc
+        if attempt < attempts - 1:
+            time.sleep(0.5 * (attempt + 1))
+    raise RuntimeError(f"Unable to fetch yfinance history for {ticker.ticker}: {last_error}")
 
 
 def init_ticker(func: Callable) -> Callable:
@@ -38,7 +54,7 @@ class YFinanceUtils:
         # add one day to the end_date so that the data range is inclusive
         end_date = pd.to_datetime(end_date) + pd.DateOffset(days=1)
         end_date = end_date.strftime("%Y-%m-%d")
-        stock_data = ticker.history(start=start_date, end=end_date)
+        stock_data = _history_with_retry(ticker, start=start_date, end=end_date)
         # save_output(stock_data, f"Stock data for {ticker.ticker}", save_path)
         return stock_data
 
@@ -66,7 +82,7 @@ class YFinanceUtils:
         }
         company_info_df = DataFrame([company_info])
         if save_path:
-            company_info_df.to_csv(save_path)
+            company_info_df.to_csv(save_path, encoding="utf-8")
             print(f"Company info for {ticker.ticker} saved to {save_path}")
         return company_info_df
 
@@ -78,7 +94,7 @@ class YFinanceUtils:
         ticker = symbol
         dividends = ticker.dividends
         if save_path:
-            dividends.to_csv(save_path)
+            dividends.to_csv(save_path, encoding="utf-8")
             print(f"Dividends for {ticker.ticker} saved to {save_path}")
         return dividends
 

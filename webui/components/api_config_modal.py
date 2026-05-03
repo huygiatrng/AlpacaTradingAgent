@@ -22,6 +22,78 @@ API_CONFIGS = [
         "icon": "fas fa-brain"
     },
     {
+        "id": "google",
+        "name": "Google API Key",
+        "env_var": "GOOGLE_API_KEY",
+        "placeholder": "Your Google AI Studio API key",
+        "help_url": "https://aistudio.google.com/app/apikey",
+        "help_text": "Required when using Gemini models",
+        "icon": "fab fa-google"
+    },
+    {
+        "id": "anthropic",
+        "name": "Anthropic API Key",
+        "env_var": "ANTHROPIC_API_KEY",
+        "placeholder": "sk-ant-...",
+        "help_url": "https://console.anthropic.com/settings/keys",
+        "help_text": "Required when using Claude models",
+        "icon": "fas fa-robot"
+    },
+    {
+        "id": "xai",
+        "name": "xAI API Key",
+        "env_var": "XAI_API_KEY",
+        "placeholder": "xai-...",
+        "help_url": "https://console.x.ai/",
+        "help_text": "Required when using Grok models",
+        "icon": "fas fa-x"
+    },
+    {
+        "id": "deepseek",
+        "name": "DeepSeek API Key",
+        "env_var": "DEEPSEEK_API_KEY",
+        "placeholder": "sk-...",
+        "help_url": "https://platform.deepseek.com/api_keys",
+        "help_text": "Required when using DeepSeek models",
+        "icon": "fas fa-water"
+    },
+    {
+        "id": "dashscope",
+        "name": "DashScope API Key",
+        "env_var": "DASHSCOPE_API_KEY",
+        "placeholder": "sk-...",
+        "help_url": "https://dashscope.console.aliyun.com/apiKey",
+        "help_text": "Required when using Qwen models",
+        "icon": "fas fa-cloud"
+    },
+    {
+        "id": "zhipu",
+        "name": "Zhipu API Key",
+        "env_var": "ZHIPU_API_KEY",
+        "placeholder": "Your Zhipu API key",
+        "help_url": "https://bigmodel.cn/usercenter/proj-mgmt/apikeys",
+        "help_text": "Required when using GLM models",
+        "icon": "fas fa-cube"
+    },
+    {
+        "id": "openrouter",
+        "name": "OpenRouter API Key",
+        "env_var": "OPENROUTER_API_KEY",
+        "placeholder": "sk-or-...",
+        "help_url": "https://openrouter.ai/settings/keys",
+        "help_text": "Required when using OpenRouter",
+        "icon": "fas fa-route"
+    },
+    {
+        "id": "azure-openai",
+        "name": "Azure OpenAI API Key",
+        "env_var": "AZURE_OPENAI_API_KEY",
+        "placeholder": "Your Azure OpenAI key",
+        "help_url": "https://portal.azure.com/",
+        "help_text": "Required when using Azure OpenAI",
+        "icon": "fab fa-microsoft"
+    },
+    {
         "id": "alpaca-key",
         "name": "Alpaca API Key",
         "env_var": "ALPACA_API_KEY",
@@ -65,6 +137,15 @@ API_CONFIGS = [
         "help_url": "https://www.cryptocompare.com/cryptopian/api-keys",
         "help_text": "Required for cryptocurrency news",
         "icon": "fab fa-bitcoin"
+    },
+    {
+        "id": "alpha-vantage",
+        "name": "Alpha Vantage API Key",
+        "env_var": "ALPHA_VANTAGE_API_KEY",
+        "placeholder": "Your Alpha Vantage key",
+        "help_url": "https://www.alphavantage.co/support/#api-key",
+        "help_text": "Optional fallback market data source",
+        "icon": "fas fa-chart-area"
     },
 ]
 

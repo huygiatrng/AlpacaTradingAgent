@@ -721,8 +721,16 @@ def _render_memory_context(
     return _truncate(rendered, max_chars)
 
 
-def _render_all_reports_text(state: Dict[str, Any]) -> str:
-    """Render full analyst reports without truncation so downstream agents can access all data."""
+def _render_all_reports_text(
+    state: Dict[str, Any],
+    config: Dict[str, Any] | None = None,
+) -> str:
+    """Render full analyst reports only when explicitly enabled (latency heavy)."""
+    cfg = _get_context_config(config)
+    include_full = bool((config or {}).get("include_full_reports_in_prompts", False))
+    if not include_full:
+        return "Full raw reports omitted for latency. Use claim matrix + retrieved evidence context."
+
     lines: List[str] = []
     lines.append("Full Analyst Reports (Untruncated):")
     for report_key, report_label in REPORT_SPECS:
@@ -837,7 +845,7 @@ def get_agent_context_bundle(
         "analysis_context_compact": analysis_context_compact,
         "decision_claim_matrix": decision_claim_matrix,
         "memory_context": memory_context,
-        "all_reports_text": _render_all_reports_text(state),
+        "all_reports_text": _render_all_reports_text(state, config=config),
         "selected_chunk_ids": [chunk["id"] for chunk in selected_chunks],
         "context_stats": context.get("stats", {}),
     }
