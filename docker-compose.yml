@@ -5,19 +5,26 @@ services:
       dockerfile: Dockerfile
     image: alpaca-trading-agent:web
     container_name: alpaca-trading-agent-web
+    init: true
     env_file:
-      - .env
+      - ${ENV_FILE:-.env}
     environment:
-      - PORT=7860
-      - TZ=America/New_York        # <-- set container timezone
+      PORT: "7860"
+      SERVER_NAME: "0.0.0.0"
+      TZ: "${TZ:-America/New_York}"
+      TRADINGAGENTS_CACHE_DIR: /app/tradingagents/dataflows/data_cache
+      TRADINGAGENTS_RESULTS_DIR: /app/eval_results
+      TRADINGAGENTS_MEMORY_LOG_PATH: /app/.tradingagents/memory/trading_memory.md
     ports:
-      - "127.0.0.1:7860:7860"
+      - "127.0.0.1:${HOST_PORT:-7860}:7860"
     restart: unless-stopped
-    command: ["python", "run_webui_dash.py", "--server-name", "0.0.0.0", "--port", "7860"]
+    stop_grace_period: 30s
     volumes:
       - data-cache:/app/tradingagents/dataflows/data_cache
-      - /etc/localtime:/etc/localtime:ro   # <-- sync container clock with host
-      - /etc/timezone:/etc/timezone:ro     # <-- propagate host timezone name
+      - eval-results:/app/eval_results
+      - trading-state:/app/.tradingagents
 
 volumes:
   data-cache:
+  eval-results:
+  trading-state:

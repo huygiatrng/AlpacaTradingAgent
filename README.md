@@ -204,12 +204,16 @@ Common options:
 - `--debug`: Run in debug mode with more logging
 - `--max-threads N`: Set the maximum number of threads (default: 40)
 
-or you can launch this with Docker via:
+or launch it with Docker:
+
 ```bash
-docker-compose up -d --build
+cp env.sample .env
+# Edit .env with your provider, market data, and Alpaca credentials first.
+docker compose up -d --build
 ```
 
-These will start a local web server at http://localhost:7860.
+This starts a local web server at http://localhost:7860. To use a different
+host port, set `HOST_PORT`, for example `HOST_PORT=7861 docker compose up -d --build`.
 
 #### Enhanced Web UI Features
 

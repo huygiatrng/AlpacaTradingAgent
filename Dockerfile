@@ -1,47 +1,78 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1.7
 
-# Base image
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PATH="/opt/venv/bin:${PATH}"
 
 WORKDIR /app
 
-# System dependencies for building some Python packages (lxml, hnswlib, etc.)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       build-essential \
-       gcc \
-       g++ \
-       cmake \
-       libxml2-dev \
-       libxslt1-dev \
-       libffi-dev \
-       curl \
+        build-essential \
+        cmake \
+        gcc \
+        g++ \
+        libffi-dev \
+        libxml2-dev \
+        libxslt1-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies first for better layer caching
-COPY requirements.txt ./
-RUN python -m pip install --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+RUN python -m venv /opt/venv
 
-# Copy project files
+COPY requirements.txt ./
+RUN python -m pip install --upgrade pip setuptools wheel \
+    && python -m pip install -r requirements.txt
+
+
+FROM python:3.11-slim-bookworm AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PATH="/opt/venv/bin:${PATH}" \
+    PORT=7860 \
+    SERVER_NAME=0.0.0.0 \
+    TRADINGAGENTS_CACHE_DIR=/app/tradingagents/dataflows/data_cache \
+    TRADINGAGENTS_RESULTS_DIR=/app/eval_results \
+    TRADINGAGENTS_MEMORY_LOG_PATH=/app/.tradingagents/memory/trading_memory.md \
+    MPLCONFIGDIR=/tmp/matplotlib
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libgomp1 \
+        libxml2 \
+        libxslt1.1 \
+        tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/venv /opt/venv
 COPY . .
 
-# Install the package itself (ensures setup.py install_requires are satisfied)
-RUN pip install --no-cache-dir -e .
+RUN python -m pip install --no-deps -e . \
+    && groupadd --system app \
+    && useradd --system --gid app --home-dir /app --shell /usr/sbin/nologin app \
+    && mkdir -p \
+        /app/tradingagents/dataflows/data_cache \
+        /app/eval_results \
+        /app/.tradingagents/memory \
+        /tmp/matplotlib \
+    && chown -R app:app /app /tmp/matplotlib
 
-# Create non-root user
-RUN adduser --disabled-password --gecos "" appuser \
-    && chown -R appuser:appuser /app
-USER appuser
+USER app
 
-# Expose the Dash server port
 EXPOSE 7860
 
-# Default command: bind to 0.0.0.0 for container networking
-CMD ["python", "run_webui_dash.py", "--server-name", "0.0.0.0"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
+    CMD python -c "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\", \"7860\")}', timeout=3).read(1)"
+
+CMD ["sh", "-c", "exec python run_webui_dash.py --server-name \"${SERVER_NAME:-0.0.0.0}\" --port \"${PORT:-7860}\""]
 
 

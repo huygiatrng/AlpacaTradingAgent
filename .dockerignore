@@ -8,6 +8,16 @@ venv
 .env
 *.env
 node_modules
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+output/
+.playwright-cli/
 *.log
 *.sqlite3
 *.db
