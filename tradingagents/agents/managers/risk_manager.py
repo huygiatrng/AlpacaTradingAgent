@@ -14,6 +14,7 @@ from ..utils.report_context import (
 )
 from ..utils.structured import bind_structured, invoke_structured_or_freetext
 from tradingagents.dataflows.alpaca_utils import AlpacaUtils
+from tradingagents.prompts import render_prompt
 
 # Import prompt capture utility
 try:
@@ -104,7 +105,7 @@ def create_risk_manager(llm, memory, config=None):
         output_language = (config or {}).get("output_language", "English")
         context_bundle = get_agent_context_bundle(
             state,
-            agent_role="risk_manager",
+            agent_role="managers/risk_manager",
             objective=(
                 f"Judge risk debate and finalize risk-adjusted trade decision for {company_name}. "
                 f"Trader plan: {trader_plan}"
@@ -123,34 +124,24 @@ def create_risk_manager(llm, memory, config=None):
             past_memory_str += rec["recommendation"] + "\n\n"
         decision_memory_str = decision_log.get_past_context(company_name)
 
-        prompt = f"""{agent_context}
-
-You are the final swing-trading risk judge. Make a decisive {decision_format} call with strict downside controls.
-
-Inputs:
-- Current position status: {open_pos_desc}
-- Position stats: {position_stats_desc}
-- Account stats: {account_status_desc}
-- Trader plan: {trader_plan}
-- Decision claim matrix: {claim_matrix}
-- Full untruncated analyst reports: {all_reports_text}
-- Risk debate digest: {risk_debate_digest}
-- Full risk debate history: {history}
-- Past lessons: {past_memory_str}
-- Persistent decision lessons: {decision_memory_str}
-
-Decision constraints:
-1. Reject proposals implying >3% account risk or unclear exits.
-2. Require explicit invalidation/stop logic.
-3. Prioritize capital preservation under elevated volatility/event risk.
-
-Output format (concise):
-- Recommendation: {actions} (with confidence high/medium/low)
-- 4-6 concise bullets explaining risk rationale and required risk controls
-- End exactly with: {final_format}
-- Write the analysis in {output_language}; keep the final transaction proposal line in English with the exact action token.
-
-Keep response under 260 words."""
+        prompt = render_prompt(
+            "managers/risk_manager",
+            agent_context=agent_context,
+            decision_format=decision_format,
+            open_pos_desc=open_pos_desc,
+            position_stats_desc=position_stats_desc,
+            account_status_desc=account_status_desc,
+            trader_plan=trader_plan,
+            claim_matrix=claim_matrix,
+            all_reports_text=all_reports_text,
+            risk_debate_digest=risk_debate_digest,
+            history=history,
+            past_memory_str=past_memory_str,
+            decision_memory_str=decision_memory_str,
+            actions=actions,
+            final_format=final_format,
+            output_language=output_language,
+        )
 
         # Capture the COMPLETE prompt that gets sent to the LLM
         capture_agent_prompt("final_trade_decision", prompt, company_name)

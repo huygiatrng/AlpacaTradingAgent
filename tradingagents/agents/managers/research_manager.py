@@ -12,6 +12,7 @@ from ..utils.agent_trading_modes import (
 )
 from ..utils.memory import TradingMemoryLog
 from ..utils.structured import bind_structured, invoke_structured_or_freetext
+from tradingagents.prompts import render_prompt
 
 # Import prompt capture utility
 try:
@@ -38,7 +39,7 @@ def create_research_manager(llm, memory, config=None):
 
         context_bundle = get_agent_context_bundle(
             state,
-            agent_role="research_manager",
+            agent_role="managers/research_manager",
             objective=(
                 f"Adjudicate bull/bear debate for {state.get('company_of_interest', '')} "
                 "and produce a decisive investment plan."
@@ -56,28 +57,18 @@ def create_research_manager(llm, memory, config=None):
             past_memory_str += rec["recommendation"] + "\n\n"
         decision_memory_str = decision_log.get_past_context(ticker)
 
-        prompt = f"""As the portfolio manager and debate facilitator, decide a clear action ({actions}) from the strongest evidence, then provide an executable swing plan.
-
-Use these inputs:
-- Decision claim matrix: {claim_matrix}
-- Full untruncated analyst reports: {all_reports_text}
-- Debate digest: {debate_digest}
-- Past reflections: {past_memory_str}
-- Persistent decision lessons: {decision_memory_str}
-- Full debate history: {history}
-
-Output requirements:
-1. Recommendation ({actions}) with confidence (high/medium/low).
-2. 3-5 key reasons tied to evidence.
-3. Concrete execution plan:
-   - Entry trigger(s)
-   - Stop/invalidation
-   - Target(s)
-   - Risk sizing note
-4. End with: {final_format}
-5. Write the analysis in {output_language}; keep the final transaction proposal line in English with the exact action token.
-
-Keep it concise and actionable (max 420 words)."""
+        prompt = render_prompt(
+            "managers/research_manager",
+            actions=actions,
+            claim_matrix=claim_matrix,
+            all_reports_text=all_reports_text,
+            debate_digest=debate_digest,
+            past_memory_str=past_memory_str,
+            decision_memory_str=decision_memory_str,
+            history=history,
+            final_format=final_format,
+            output_language=output_language,
+        )
 
         # Capture the COMPLETE prompt that gets sent to the LLM
         capture_agent_prompt("research_manager_report", prompt, ticker)

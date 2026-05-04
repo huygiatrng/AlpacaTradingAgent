@@ -2,6 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 import time
 import json
 from langchain_core.messages import AIMessage, ToolMessage
+from tradingagents.prompts import load_prompt, render_prompt
 
 # Import prompt capture utility
 try:
@@ -54,48 +55,21 @@ def create_macro_analyst(llm, toolkit):
                 )
             )
 
-            system_message = (
-                "You are a SWING TRADING macro analyst focused on identifying macroeconomic factors and events that could drive multi-day market movements within a 2-10 day swing horizon. "
-                "Your analysis should focus on macro catalysts and data releases that affect swing trading positions across different sectors and asset classes.\n\n"
-                "**SWING TRADING MACRO FOCUS:**\n"
-                "1. **Upcoming Economic Data**: CPI, NFP, GDP, PMI releases within the swing holding period that could accelerate or reverse trends\n"
-                "2. **Federal Reserve Schedule**: FOMC meetings, Fed speak, policy announcements during the swing window\n"
-                "3. **Market Risk Sentiment**: VIX levels, yield curve trends, sector rotation patterns over multiple days\n"
-                "4. **Multi-Day Sector Rotation**: Macro themes driving sustained money flows between sectors\n"
-                "5. **Currency & Commodity Trends**: USD strength, oil prices, gold trends affecting sector performance over days\n"
-                "6. **Geopolitical Events**: Elections, trade decisions, central bank actions within the swing period\n\n"
-                "**SWING TRADING MACRO ANALYSIS REQUIREMENTS:**\n"
-                "- **Event Calendar**: Specific dates for economic releases, Fed events during the 2-10 day swing window\n"
-                "- **Market Impact Assessment**: Which data releases could create >2% moves or trend reversals\n"
-                "- **Sector Implications**: How macro data affects different sectors (tech, banks, energy, etc.) over multiple days\n"
-                "- **Risk-On/Risk-Off Signals**: Macro conditions favoring growth vs. defensive stocks for swing positioning\n"
-                "- **Volatility Outlook**: Expected market volatility during the swing holding period (VIX implications)\n"
-                "- **Trend Support/Threat**: Macro conditions that support or threaten the current multi-day trend\n\n"
-                "**AVOID:** Very long-term economic forecasts, annual outlooks. Focus on actionable macro insights "
-                "for swing traders covering the 2-10 day horizon, with specific dates, expected reactions, and sector implications. "
-                "Provide timing-specific macro analysis that swing traders can use to manage positions through economic events.\n\n"
-                + source_guidance + "\n\n"
-                "Make sure to append a Markdown table organizing:\n"
-                "| Date/Time | Economic Event | Expected Impact | Affected Sectors | Swing Trade Implication |\n"
-                "|-----------|----------------|-----------------|------------------|------------------------|\n"
-                "| [Specific Date/Time] | [Data Release/Fed Event] | [High/Med/Low + Direction] | [Sectors Most Affected] | [Long/Short/Neutral Bias] |"
+            system_message = render_prompt(
+                "analysts/macro_system",
+                source_guidance=source_guidance,
+            )
+            asset_context = (
+                f"Asset context is {ticker}. "
+                "Focus on macroeconomic conditions that affect overall market sentiment and sector rotation. "
+                "If tools fail due to missing API keys, provide a general macro analysis based on current market knowledge."
             )
 
             prompt = ChatPromptTemplate.from_messages(
                 [
                     (
                         "system",
-                        "You are a helpful AI assistant, collaborating with other assistants."
-                        " Use the provided tools to progress towards answering the question."
-                        " If you are unable to fully answer, that's OK; another assistant with different tools"
-                        " will help where you left off. Execute what you can to make progress."
-                        " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
-                        " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
-                        " You have access to the following tools: {tool_names}.\n{system_message}"
-                        "For your reference, the current date is {current_date}. "
-                        "Asset context is {ticker}. "
-                        "Focus on macroeconomic conditions that affect overall market sentiment and sector rotation. "
-                        "If tools fail due to missing API keys, provide a general macro analysis based on current market knowledge.",
+                        load_prompt("shared/analyst_tool_system"),
                     ),
                     MessagesPlaceholder(variable_name="messages"),
                 ]
@@ -106,6 +80,7 @@ def create_macro_analyst(llm, toolkit):
             prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
             prompt = prompt.partial(current_date=current_date)
             prompt = prompt.partial(ticker=ticker)
+            prompt = prompt.partial(asset_context=asset_context)
 
             # Capture the COMPLETE resolved prompt that gets sent to the LLM
             try:
@@ -119,11 +94,13 @@ def create_macro_analyst(llm, toolkit):
                 else:
                     # Fallback: manually construct the complete prompt
                     tool_names_str = ", ".join([tool.name for tool in tools])
-                    complete_prompt = f"""You are a helpful AI assistant, collaborating with other assistants. Use the provided tools to progress towards answering the question. If you are unable to fully answer, that's OK; another assistant with different tools will help where you left off. Execute what you can to make progress. If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable, prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop. You have access to the following tools: {tool_names_str}.
-
-{system_message}
-
-For your reference, the current date is {current_date}. Focus on macroeconomic conditions that affect overall market sentiment and sector rotation. If tools fail due to missing API keys, provide a general macro analysis based on current market knowledge."""
+                    complete_prompt = render_prompt(
+                        "shared/analyst_tool_system",
+                        tool_names=tool_names_str,
+                        system_message=system_message,
+                        current_date=current_date,
+                        asset_context=asset_context,
+                    )
                 
                 capture_agent_prompt("macro_report", complete_prompt, ticker)
             except Exception as e:
@@ -244,18 +221,10 @@ For your reference, the current date is {current_date}. Focus on macroeconomic c
             # If we had tool failures, let the LLM know and ask for a general analysis
             if tool_failures and not successful_tools:
                 print(f"[MACRO] All tools failed ({tool_failures}), requesting general macro analysis")
-                fallback_prompt = f"""
-Please provide a general macro economic analysis for {current_date} based on your knowledge of current market conditions.
-Focus on general trends in:
-- Federal Reserve policy and interest rates
-- Inflation environment 
-- Employment trends
-- Market volatility
-- Economic growth outlook
-- Trading implications for different asset classes
-
-Make sure to include a summary table at the end.
-"""
+                fallback_prompt = render_prompt(
+                    "analysts/macro_general_fallback",
+                    current_date=current_date,
+                )
                 messages_history.append(AIMessage(content=fallback_prompt))
                 try:
                     # Get final response without tools
@@ -308,12 +277,11 @@ Based on current market conditions as of {current_date}:
                 )
 
             if "FINAL TRANSACTION PROPOSAL:" not in analysis_content:
-                final_prompt = f"""Based on the following macro analysis for {current_date}, provide your final swing trading recommendation considering macroeconomic conditions and sector implications.
-
-Analysis:
-{analysis_content}
-
-Provide a brief justification and conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**"""
+                final_prompt = render_prompt(
+                    "analysts/macro_final_recommendation",
+                    current_date=current_date,
+                    analysis_content=analysis_content,
+                )
                 final_result = llm.invoke(final_prompt)
                 final_content = final_result.content if hasattr(final_result, "content") else str(final_result)
                 result = AIMessage(

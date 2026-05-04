@@ -2,6 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 import time
 import json
 from langchain_core.messages import AIMessage, ToolMessage
+from tradingagents.prompts import load_prompt, render_prompt
 
 # Import prompt capture utility
 try:
@@ -81,42 +82,27 @@ def create_fundamentals_analyst(llm, toolkit):
                 " Use all available fundamentals tools before concluding. "
                 + (f"Active sources now: {', '.join(active_sources)}." if active_sources else "No external fundamentals source is available; reason from existing context only.")
             )
-            system_message = (
-                "You are a SWING TRADING fundamentals analyst focused on identifying fundamental catalysts and factors that could drive multi-day price movements (2-10 day swing horizon). "
-                + ("Analyze DeFi metrics like TVL changes, protocol upgrades, token unlock schedules, yield farming opportunities, and major partnership announcements that could sustain multi-day crypto price trends. " if is_crypto else "Focus on earnings surprises, analyst upgrades/downgrades, insider activity, and fundamental shifts that could sustain multi-day swing moves. ")
-                + "**SWING TRADING FUNDAMENTALS FOCUS:** \n"
-                + "Look for catalysts that can sustain price movement across multiple days. Identify events within the 2-10 day holding window. \n"
-                + "**KEY AREAS FOR SWING TRADERS:** \n"
-                + "1. **Earnings & Guidance:** Recent or upcoming quarterly results, guidance changes, and surprise potential within the swing window \n"
-                + "2. **Analyst Activity:** Upgrades/downgrades, price target changes, initiation of coverage that could drive multi-day re-rating \n"
-                + "3. **Insider Trading:** Recent insider buying/selling patterns indicating multi-day directional conviction \n"
-                + "4. **Sector Trends:** Industry rotation, peer performance, relative strength persisting across days \n"
-                + "5. **Event Calendar:** FDA approvals, contract announcements, product launches within the swing holding period \n"
-                + "6. **Financial Health:** Key metrics that could trigger sustained buying or selling pressure \n"
-                + "7. **Momentum Factors:** Estimate revisions, revenue trends, and competitive positioning changes with multi-day impact \n"
-                + "**ANALYSIS REQUIREMENTS:** \n"
-                + "- Identify fundamental catalysts within the 2-10 day swing window \n"
-                + "- Assess probability and magnitude of potential multi-day price impact \n"
-                + "- Consider both positive and negative fundamental drivers over the swing period \n"
-                + "- Focus on actionable insights for swing trade entries and exits \n"
-                + "- Avoid long-term valuation metrics unless they create catalysts during the swing window \n"
-                + f"Provide detailed, actionable fundamental analysis that swing traders can use to time entries and exits around multi-day catalysts.{source_guidance}"
-                + " Make sure to append a Markdown table at the end organizing key events, dates, and potential price impact for swing trading decisions."
+            asset_focus = (
+                "Analyze DeFi metrics like TVL changes, protocol upgrades, token unlock schedules, yield farming opportunities, and major partnership announcements that could sustain multi-day crypto price trends."
+                if is_crypto
+                else "Focus on earnings surprises, analyst upgrades/downgrades, insider activity, and fundamental shifts that could sustain multi-day swing moves."
+            )
+            system_message = render_prompt(
+                "analysts/fundamentals_system",
+                asset_focus=asset_focus,
+                source_guidance=source_guidance,
+            )
+            asset_context = (
+                f"The cryptocurrency we want to analyze is {display_ticker}"
+                if is_crypto
+                else f"The company we want to look at is {ticker}"
             )
 
             prompt = ChatPromptTemplate.from_messages(
                 [
                     (
                         "system",
-                        "You are a helpful AI assistant, collaborating with other assistants."
-                        " Use the provided tools to progress towards answering the question."
-                        " If you are unable to fully answer, that's OK; another assistant with different tools"
-                        " will help where you left off. Execute what you can to make progress."
-                        " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
-                        " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
-                        " You have access to the following tools: {tool_names}.\n{system_message}"
-                        "For your reference, the current date is {current_date}. " 
-                        + ("The cryptocurrency we want to analyze is {ticker}" if is_crypto else "The company we want to look at is {ticker}"),
+                        load_prompt("shared/analyst_tool_system"),
                     ),
                     MessagesPlaceholder(variable_name="messages"),
                 ]
@@ -127,6 +113,7 @@ def create_fundamentals_analyst(llm, toolkit):
             prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
             prompt = prompt.partial(current_date=current_date)
             prompt = prompt.partial(ticker=display_ticker if is_crypto else ticker)
+            prompt = prompt.partial(asset_context=asset_context)
 
             # Capture the COMPLETE resolved prompt that gets sent to the LLM
             try:
@@ -140,13 +127,13 @@ def create_fundamentals_analyst(llm, toolkit):
                 else:
                     # Fallback: manually construct the complete prompt
                     tool_names_str = ", ".join([tool.name for tool in tools])
-                    ticker_display = display_ticker if is_crypto else ticker
-                    asset_type_text = "The cryptocurrency we want to analyze is" if is_crypto else "The company we want to look at is"
-                    complete_prompt = f"""You are a helpful AI assistant, collaborating with other assistants. Use the provided tools to progress towards answering the question. If you are unable to fully answer, that's OK; another assistant with different tools will help where you left off. Execute what you can to make progress. If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable, prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop. You have access to the following tools: {tool_names_str}.
-
-{system_message}
-
-For your reference, the current date is {current_date}. {asset_type_text} {ticker_display}"""
+                    complete_prompt = render_prompt(
+                        "shared/analyst_tool_system",
+                        tool_names=tool_names_str,
+                        system_message=system_message,
+                        current_date=current_date,
+                        asset_context=asset_context,
+                    )
                 
                 capture_agent_prompt("fundamentals_report", complete_prompt, ticker)
             except Exception as e:
@@ -247,12 +234,11 @@ For your reference, the current date is {current_date}. {asset_type_text} {ticke
             # Check if the result already contains FINAL TRANSACTION PROPOSAL
             if "FINAL TRANSACTION PROPOSAL:" not in result.content:
                 # Create a simple prompt that includes the analysis content directly
-                final_prompt = f"""Based on the following fundamental analysis for {ticker}, please provide your final trading recommendation considering the financial health, valuation, and earnings outlook.
-
-Analysis:
-{result.content}
-
-You must conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** followed by a brief justification."""
+                final_prompt = render_prompt(
+                    "analysts/fundamentals_final_recommendation",
+                    ticker=ticker,
+                    analysis_content=result.content,
+                )
                 
                 # Use a simple chain without tools for the final recommendation
                 final_chain = llm

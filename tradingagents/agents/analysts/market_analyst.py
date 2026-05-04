@@ -3,6 +3,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 import time
 import json
 import re
+from tradingagents.prompts import load_prompt, render_prompt
 
 # Import prompt capture utility
 try:
@@ -128,13 +129,10 @@ def create_market_analyst(llm, toolkit):
             )
         )
 
-        system_intro = (
-            "You are a **multi-timeframe technical analyst**. "
-            + (
-                "Your input includes a structured Technical Brief (JSON) that has already been computed deterministically across three timeframes: **1 h, 4 h, and 1 d**.\n"
-                if technical_brief_available
-                else "Build the technical view directly from the raw price and indicator tools available in this run.\n"
-            )
+        system_intro = load_prompt(
+            "analysts/market_intro_with_brief"
+            if technical_brief_available
+            else "analysts/market_intro_without_brief"
         )
         anchor_guidance = (
             "**Important**: Anchor your thesis in both Alpaca price action and Stockstats indicators."
@@ -142,72 +140,21 @@ def create_market_analyst(llm, toolkit):
             else "**Important**: Anchor your thesis in the available Stockstats evidence and explicitly note that Alpaca price data is unavailable."
         )
 
-        system_message = (
-            system_intro
-            + "\n\n## Your workflow\n\n"
-            + workflow_intro
-            + workflow_step_two
-            + iteration_guidance
-            + """
-4. **Analyze the brief and raw tool evidence** — look for *SWING TRADING* setups:
-   - **Trend Strength**: Is ADX > 25? Are we above SMA 200 (Long-term trend)?
-   - **Gap Ups**: Did price gap up (>1-2%) over a Key Level (e.g., 3-Month High)?
-   - **Oversold Bounce**: Is price far below SMA 200 but reclaiming EMA 8? Stoch RSI crossing up?
-   - **Downtrend Break**: Breakout above downtrend/SMA 200 with High Volume (Vol Ratio > 1.5)?
-   - **Entry Timing**: Look for Stoch RSI crossovers or pullback to EMA 8.
-   - **Confluence**: Do 4h and 1d agree?
-
-5. **Produce your analysis** with these sections:
-
-## Conclusion
-State **BULLISH**, **BEARISH**, or **NEUTRAL** with a 1-sentence rationale.
-
-## Entry Conditions
-Specify the price level and conditions for entering a position (e.g., "Enter long on a pullback to $185 if 1 h RSI bounces from neutral zone").
-
-## Invalidation
-The price level or condition that would invalidate the thesis (e.g., "Below $180 — daily swing low broken").
-
-## Risk Sizing Hint
-A brief note on position sizing based on ATR (e.g., "ATR $3.20 → stop 1.5x ATR = $4.80 risk per share").
-
-## Narrative
-2-3 sentences explaining *why* the setup works, connecting multi-timeframe evidence.
-
-## Summary Table
-| Field | Value |
-|-------|-------|
-| Bias | Bullish / Bearish / Neutral |
-| Setup | breakout / pullback / mean_reversion / trend_continuation |
-| Confidence | high / medium / low |
-| Entry | $xxx |
-| Target | $xxx |
-| Stop | $xxx |
-| R:R | x.x : 1 |
-
-Conclude with: **FINAL TRANSACTION PROPOSAL: BUY/HOLD/SELL** and a brief justification.
-
-**Formatting Rules (strict)**:
-- Use markdown headings exactly as listed above.
-- Keep each section on separate lines. Do not output inline "a) ... b) ... c) ..." formatting.
-- Keep table rows on separate lines (valid markdown table syntax).
-
-"""
-            + anchor_guidance
+        system_message = render_prompt(
+            "analysts/market_system",
+            system_intro=system_intro,
+            workflow_intro=workflow_intro,
+            workflow_step_two=workflow_step_two,
+            iteration_guidance=iteration_guidance,
+            anchor_guidance=anchor_guidance,
         )
+        asset_context = f"The company we want to look at is {ticker}"
 
         prompt = ChatPromptTemplate.from_messages(
             [
                 (
                     "system",
-                    " You are a helpful AI assistant, collaborating with other assistants."
-                    " Use the provided tools to progress towards answering the question."
-                    " If you are unable to fully answer, that's OK; another assistant with different tools"
-                    " will help where you left off. Execute what you can to make progress."
-                    " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
-                    " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
-                    " You have access to the following tools: {tool_names}.\n{system_message}"
-                    "For your reference, the current date is {current_date}. The company we want to look at is {ticker}",
+                    load_prompt("shared/analyst_tool_system"),
                 ),
                 MessagesPlaceholder(variable_name="messages"),
             ]
@@ -217,6 +164,7 @@ Conclude with: **FINAL TRANSACTION PROPOSAL: BUY/HOLD/SELL** and a brief justifi
         prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(ticker=ticker)
+        prompt = prompt.partial(asset_context=asset_context)
 
         # Capture the COMPLETE resolved prompt that gets sent to the LLM
         try:
@@ -230,11 +178,13 @@ Conclude with: **FINAL TRANSACTION PROPOSAL: BUY/HOLD/SELL** and a brief justifi
             else:
                 # Fallback: manually construct the complete prompt
                 tool_names_str = ", ".join([tool.name for tool in tools])
-                complete_prompt = f""" You are a helpful AI assistant, collaborating with other assistants. Use the provided tools to progress towards answering the question. If you are unable to fully answer, that's OK; another assistant with different tools will help where you left off. Execute what you can to make progress. If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable, prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop. You have access to the following tools: {tool_names_str}.
-
-{system_message}
-
-For your reference, the current date is {current_date}. The company we want to look at is {ticker}"""
+                complete_prompt = render_prompt(
+                    "shared/analyst_tool_system",
+                    tool_names=tool_names_str,
+                    system_message=system_message,
+                    current_date=current_date,
+                    asset_context=asset_context,
+                )
             
             capture_agent_prompt("market_report", complete_prompt, ticker)
         except Exception as e:
@@ -337,12 +287,11 @@ For your reference, the current date is {current_date}. The company we want to l
         # Check if the result already contains FINAL TRANSACTION PROPOSAL
         if "FINAL TRANSACTION PROPOSAL:" not in analysis_content:
             # Create a simple prompt that includes the analysis content directly
-            final_prompt = f"""Based on the following market and technical analysis for {ticker}, please provide your final trading recommendation.
-
-Analysis:
-{analysis_content}
-
-You must conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** followed by a brief justification."""
+            final_prompt = render_prompt(
+                "analysts/market_final_recommendation",
+                ticker=ticker,
+                analysis_content=analysis_content,
+            )
             
             # Use a simple chain without tools for the final recommendation
             final_chain = llm

@@ -1,0 +1,1 @@
+You are reviewing a past trading decision after the outcome is known. Write exactly 2-4 concise sentences: whether the direction worked, what thesis held or failed, and one lesson for the next similar trade.

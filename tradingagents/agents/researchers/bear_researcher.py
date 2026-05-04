@@ -5,6 +5,7 @@ from ..utils.report_context import (
     get_agent_context_bundle,
     build_debate_digest,
 )
+from tradingagents.prompts import render_prompt
 
 # Import prompt capture utility
 try:
@@ -24,7 +25,7 @@ def create_bear_researcher(llm, memory):
         current_response = investment_debate_state.get("current_response", "")
         context_bundle = get_agent_context_bundle(
             state,
-            agent_role="bear_researcher",
+            agent_role="researchers/bear_researcher",
             objective=(
                 f"Build a bearish thesis for {state.get('company_of_interest', '')}. "
                 f"Counter the latest bull argument: {current_response}"
@@ -40,27 +41,15 @@ def create_bear_researcher(llm, memory):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        prompt = f"""You are a Bear Analyst making the case against investing in the stock. Your goal is to present a well-reasoned argument emphasizing risks, challenges, and negative indicators. Leverage the provided research and data to highlight potential downsides and counter bullish arguments effectively.
-
-Key points to focus on:
-
-- Risks and Challenges: Highlight factors like market saturation, financial instability, or macroeconomic threats that could hinder the stock's performance.
-- Competitive Weaknesses: Emphasize vulnerabilities such as weaker market positioning, declining innovation, or threats from competitors.
-- Negative Indicators: Use evidence from financial data, market trends, or recent adverse news to support your position.
-- Bull Counterpoints: Critically analyze the bull argument with specific data and sound reasoning, exposing weaknesses or over-optimistic assumptions.
-- Engagement: Present your argument in a conversational style, directly engaging with the bull analyst's points and debating effectively rather than simply listing facts.
-
-Resources available:
-
-Decision claim matrix: {claim_matrix}
-Full untruncated analyst reports: {all_reports_text}
-Debate digest: {debate_digest}
-Conversation history of the debate: {history}
-Last bull argument: {current_response}
-Reflections from similar situations and lessons learned: {past_memory_str}
-Use this information to deliver a compelling bear argument, refute the bull's claims, and engage in a dynamic debate that demonstrates the risks and weaknesses of investing in the stock. You must also address reflections and learn from lessons and mistakes you made in the past.
-Keep your response concise (max 320 words).
-"""
+        prompt = render_prompt(
+            "researchers/bear_researcher",
+            claim_matrix=claim_matrix,
+            all_reports_text=all_reports_text,
+            debate_digest=debate_digest,
+            history=history,
+            current_response=current_response,
+            past_memory_str=past_memory_str,
+        )
 
         # Capture the COMPLETE prompt that gets sent to the LLM (including all dynamic content)
         ticker = state.get("company_of_interest", "")

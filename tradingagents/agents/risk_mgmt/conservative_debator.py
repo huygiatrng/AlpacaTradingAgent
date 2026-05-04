@@ -6,6 +6,7 @@ from ..utils.report_context import (
     get_agent_context_bundle,
     build_debate_digest,
 )
+from tradingagents.prompts import render_prompt
 
 # Import prompt capture utility
 try:
@@ -51,63 +52,24 @@ def create_safe_debator(llm, config=None):
         debate_digest = build_debate_digest(risk_debate_state, "risk", config=config)
         all_reports_text = context_bundle.get("all_reports_text", "")
 
-        # Use centralized trading mode context with conservative risk bias
-        risk_specific_context = f"""
-{agent_context}
+        risk_specific_context = render_prompt(
+            "risk/conservative_context",
+            agent_context=agent_context,
+        )
 
-**CONSERVATIVE SWING TRADING APPROACH:**
-As the Conservative Risk Analyst for swing trading, you prioritize capital preservation while capturing controlled multi-day moves:
-
-**CONSERVATIVE SWING PRINCIPLES:**
-- **Position Sizing:** Never risk more than 1.5% per swing trade (vs. aggressive 3%)
-- **Entry Timing:** Wait for clear multi-timeframe confirmation (1h/4h/1d alignment) before entering
-- **Stop Losses:** Tight stops at 1.5x ATR below entry, placed at key swing levels
-- **Target Profits:** Take partial profits (50%) at first swing target; trail the remainder
-- **Market Selection:** Favor liquid, established stocks over volatile small-caps for swing holds
-- **Risk/Reward:** Minimum 2.5:1 R/R ratio required, preferably 3:1
-
-**CONSERVATIVE RISK ASSESSMENT:**
-1. **Event Risk:** Minimize exposure to earnings/major news during the 2-10 day holding period
-2. **Gap Risk:** Avoid swing positions in stocks prone to large gaps without clear catalysts
-3. **Liquidity Risk:** Only swing trade stocks with >1M average daily volume
-4. **Market Environment:** Reduce swing exposure during high VIX periods (>25)
-5. **Position Limits:** Maximum 15% of portfolio in swing positions total
-6. **Time Limits:** Exit swing trades if thesis is invalidated or max holding period (10 days) is reached
-
-**CONSERVATIVE SWING SIGNALS:**
-- Require multi-timeframe confluence (1h/4h/1d) before entry
-- Prefer buying at pullbacks to support rather than chasing breakouts
-- Exit immediately if stop loss is hit, no second chances
-- Take 50% profits at first swing target to lock in gains
-- Avoid initiating new swings during major earnings weeks or FOMC events
-
-Focus on preserving capital first, generating returns second. Challenge aggressive proposals that exceed conservative risk limits."""
-
-        prompt = f"""As the Safe/Conservative Risk Analyst, your primary objective is to protect assets, minimize volatility, and ensure steady, reliable growth. You prioritize stability, security, and risk mitigation, carefully assessing potential losses, economic downturns, and market volatility. {risk_specific_context}
-
-When evaluating the trader's decision or plan, critically examine high-risk elements, pointing out where the decision may expose the firm to undue risk and where more cautious alternatives could secure long-term gains.
-
-Here is the trader's decision:
-{trader_decision}
-
-Your task is to actively counter the arguments of the Risky and Neutral Analysts, advocating for conservative {actions} and highlighting where their views may overlook potential threats or fail to prioritize sustainability. Respond directly to their points, drawing from the following data sources to build a convincing case for a low-risk approach adjustment to the trader's decision:
-
-Decision claim matrix: {claim_matrix}
-Full untruncated analyst reports: {all_reports_text}
-Risk debate digest: {debate_digest}
-Full conversation history: {history}
-
-Last risky response: {current_risky_response} 
-Last neutral response: {current_neutral_response}. 
-
-If there are no responses from the other viewpoints, do not hallucinate and just present your point.
-
-Engage by questioning their optimism and emphasizing the potential downsides they may have overlooked. Address each of their counterpoints to showcase why a conservative stance is ultimately the safest path for the firm's assets. Focus on debating and critiquing their arguments to demonstrate the strength of a low-risk strategy over their approaches. 
-
-Always conclude with your recommendation using the format: {decision_format}
-
-Output conversationally as if you are speaking without any special formatting.
-Keep your response concise (max 300 words)."""
+        prompt = render_prompt(
+            "risk/conservative_debator",
+            risk_specific_context=risk_specific_context,
+            trader_decision=trader_decision,
+            actions=actions,
+            claim_matrix=claim_matrix,
+            all_reports_text=all_reports_text,
+            debate_digest=debate_digest,
+            history=history,
+            current_risky_response=current_risky_response,
+            current_neutral_response=current_neutral_response,
+            decision_format=decision_format,
+        )
 
         # Capture the COMPLETE prompt that gets sent to the LLM
         ticker = state.get("company_of_interest", "")

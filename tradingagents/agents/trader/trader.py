@@ -16,6 +16,7 @@ from ..utils.report_context import (
 )
 from ..utils.structured import bind_structured, invoke_structured_or_freetext
 from tradingagents.dataflows.alpaca_utils import AlpacaUtils
+from tradingagents.prompts import render_prompt
 
 # Import prompt capture utility
 try:
@@ -121,71 +122,19 @@ def create_trader(llm, memory, config=None):
             past_memory_str += rec["recommendation"] + "\n\n"
         decision_memory_str = decision_log.get_past_context(company_name)
 
-        # Use centralized trading mode context for trader-specific instructions
-        trader_context = f"""
-{agent_context}
-
-**SWING TRADER DECISION MAKING:**
-As the Swing Trader, you specialize in capturing multi-day price moves (2-10 day holding period). You focus on:
-
-**SWING TRADING METHODOLOGY:**
-- **Holding Period:** 2-10 trading days, targeting intermediate swing moves
-- **Entry Strategy:** Based on multi-timeframe confluence (1h/4h/1d), pullbacks to support, or breakout setups
-- **Exit Strategy:** Predefined swing targets at key resistance/support levels, or trailing stops
-- **Risk Management:** Risk 1-3% per trade, target 3-9% returns (2:1 to 3:1 R/R)
-- **Position Sizing:** Based on ATR-derived stop distance and account risk tolerance
-
-**SWING TRADING DECISION CRITERIA:**
-1. **Multi-Timeframe Setup:** 1h/4h/1d trend alignment and confluence at key levels
-2. **Volume Confirmation:** Volume supporting breakouts, reversals, or trend continuation
-3. **Risk/Reward:** Minimum 2:1 risk-reward ratio based on swing targets
-4. **Catalyst Awareness:** Earnings, macro events, or news during the planned holding period
-5. **Market Structure:** Break of structure, change of character, and swing point analysis
-6. **Volatility Assessment:** ATR percentile and Bollinger squeeze/breakout signals
-
-**POSITION MANAGEMENT:**
-- Enter at key technical levels with multi-timeframe confirmation
-- Use ATR-based stops (1.5-2x ATR below entry for longs)
-- Trail stops as trade moves in your favor
-- Monitor daily but avoid overreacting to intraday noise
-- Never risk more than 3% on any single swing trade
-
-Current Alpaca Position Status:
-{open_pos_desc}
-
-{position_stats_desc}
-
-Alpaca Account Status:
-{account_status_desc}
-
-Decision Claim Matrix:
-{claim_matrix}
-
-Full Untruncated Analyst Reports:
-{all_reports_text}
-
-Investment Debate Digest:
-{debate_digest}
-
-Your {decision_format} should be based on:
-- **Entry Point:** Specific price level for swing entry based on technical levels
-- **Target Price:** Realistic swing target based on key resistance/support levels
-- **Stop Loss:** ATR-based or below key swing low/high (1.5-2x ATR)
-- **Position Size:** Calculated from stop distance and max risk per trade
-- **Time Horizon:** Expected 2-10 day hold with daily monitoring
-
-Always conclude with: {final_format}
-
-**CRITICAL:** Focus on swing trading setups, not intraday scalping or long-term investments.
-Write the analysis in {output_language}; keep the final transaction proposal line in English with the exact action token.
-
-**ANALYSIS REQUIREMENT:** Provide comprehensive swing trading analysis including:
-1. **Multi-Timeframe Setup** - 1h/4h/1d alignment, trend structure, key levels
-2. **Entry Strategy** - Specific entry points with confirmation criteria
-3. **Risk Management** - ATR-based stop loss placement and position sizing
-4. **Profit Targets** - Swing targets based on resistance levels and measured moves
-5. **Holding Period Risk** - Assessment of events/catalysts during the swing window
-6. **Market Context** - How broader trend and macro conditions support the trade"""
+        trader_context = render_prompt(
+            "trader/trader_context",
+            agent_context=agent_context,
+            open_pos_desc=open_pos_desc,
+            position_stats_desc=position_stats_desc,
+            account_status_desc=account_status_desc,
+            claim_matrix=claim_matrix,
+            all_reports_text=all_reports_text,
+            debate_digest=debate_digest,
+            decision_format=decision_format,
+            final_format=final_format,
+            output_language=output_language,
+        )
 
         # Enhanced content validation for investment plan
         plan_content = investment_plan if investment_plan else ""
@@ -193,33 +142,11 @@ Write the analysis in {output_language}; keep the final transaction proposal lin
         # Check if investment plan is substantial enough
         if len(plan_content.strip()) < 150 or ("FINAL TRANSACTION PROPOSAL:" in plan_content and len(plan_content.replace("FINAL TRANSACTION PROPOSAL:", "").strip()) < 100):
             # Generate enhanced analysis prompt when investment plan is insufficient
-            enhanced_prompt = f"""As a Swing Trader specializing in multi-day positions (2-10 days), provide a comprehensive trading plan for {company_name}.
-
-**AVAILABLE ANALYSIS PACKET:**
-{analysis_context}
-
-**REQUIRED SWING TRADING PLAN:**
-Provide a detailed analysis covering:
-1. **Multi-Timeframe Setup** - 1h/4h/1d alignment, key levels, trend structure
-2. **Swing Entry Strategy** - Specific entry points, pullback or breakout criteria
-3. **Risk Management Plan** - ATR-based stop loss, position sizing methodology
-4. **Swing Target Strategy** - Realistic multi-day targets based on key levels
-5. **Time Horizon Assessment** - Expected 2-10 day hold rationale
-6. **Market Context Integration** - How macro/news/sentiment affects the swing setup
-
-**TRADING DECISION TABLE:**
-Include a markdown table with:
-| Aspect | Details |
-|--------|---------|
-| Entry Price | $X.XX (specific level) |
-| Stop Loss | $X.XX (ATR-based or below swing low) |
-| Target 1 | $X.XX (first swing target) |
-| Target 2 | $X.XX (extended target) |
-| Risk/Reward | X:1 ratio |
-| Position Size | X shares (based on stop distance) |
-| Time Frame | X-X days expected hold |
-
-Focus on actionable swing trading insights with specific price levels and risk management."""
+            enhanced_prompt = render_prompt(
+                "trader/trader_enhanced_plan",
+                company_name=company_name,
+                analysis_context=analysis_context,
+            )
 
             context = {
                 "role": "user", 
@@ -229,22 +156,25 @@ Focus on actionable swing trading insights with specific price levels and risk m
             # Use original context with valid investment plan
             context = {
                 "role": "user",
-                "content": f"Based on comprehensive swing trading analysis by specialist analysts, here is a swing trading plan for {company_name}. This plan incorporates multi-timeframe technical analysis (1h/4h/1d), key levels, and volume analysis optimized for multi-day swing positions.\n\nProposed Swing Trading Plan: {investment_plan}\n\nMake your swing trading decision focusing on clear entry points, swing targets, and ATR-based stop losses with proper risk management for a 2-10 day holding period. Keep final output concise (max 380 words).",
+                "content": render_prompt(
+                    "trader/trader_user_plan",
+                    company_name=company_name,
+                    investment_plan=investment_plan,
+                ),
             }
 
         messages = [
             {
                 "role": "system",
-                "content": f"""You are a trading agent analyzing market data to make investment decisions. {trader_context}
-
-Do not forget to utilize lessons from past decisions to learn from your mistakes. Here is some reflections from similar situations you traded in and the lessons learned: {past_memory_str}""",
+                "content": render_prompt(
+                    "trader/trader_system",
+                    trader_context=trader_context,
+                    past_memory_str=past_memory_str,
+                    decision_memory_str=decision_memory_str,
+                ),
             },
             context,
         ]
-        messages[0]["content"] += (
-            "\n\nPersistent decision log lessons for this symbol and recent cross-ticker "
-            f"setups:\n{decision_memory_str}"
-        )
 
         # Capture the COMPLETE prompt that gets sent to the LLM
         try:
@@ -275,18 +205,10 @@ USER MESSAGE:
         # Check if we have substantial analysis content
         if len(analysis_content.strip()) < 200 or ("FINAL TRANSACTION PROPOSAL:" in analysis_content and len(analysis_content.replace("FINAL TRANSACTION PROPOSAL:", "").strip()) < 150):
             # Generate fallback comprehensive analysis
-            fallback_prompt = f"""As an expert swing trader, create a comprehensive trading plan for {company_name} focusing on multi-day positions (2-10 days).
-
-**SWING TRADING ANALYSIS:**
-1. **Multi-Timeframe Setup** - Analyze 1h/4h/1d trend alignment and key levels
-2. **Entry Strategy** - Define specific entry points at pullbacks or breakouts
-3. **Risk Management** - Calculate ATR-based stop losses and position size
-4. **Swing Targets** - Set realistic multi-day price objectives
-5. **Holding Period** - Establish expected 2-10 day time horizon
-
-Include detailed reasoning for swing trading decisions and conclude with a clear recommendation.
-
-Focus on actionable insights with specific price levels and risk parameters. Keep response under 360 words."""
+            fallback_prompt = render_prompt(
+                "trader/trader_fallback_plan",
+                company_name=company_name,
+            )
             
             analysis_content = invoke_structured_or_freetext(
                 structured_llm,
@@ -299,12 +221,12 @@ Focus on actionable insights with specific price levels and risk parameters. Kee
         # Ensure we have a final recommendation
         if "FINAL TRANSACTION PROPOSAL:" not in analysis_content:
             # Create final recommendation based on analysis
-            final_prompt = f"""Based on the following swing trading analysis for {company_name}, provide your final trading decision.
-
-Analysis:
-{analysis_content}
-
-Provide a brief justification (max 4 bullets) and conclude with: {final_format}"""
+            final_prompt = render_prompt(
+                "trader/trader_final_decision",
+                company_name=company_name,
+                analysis_content=analysis_content,
+                final_format=final_format,
+            )
             
             final_content = invoke_structured_or_freetext(
                 structured_llm,

@@ -215,6 +215,19 @@ docker compose up -d --build
 This starts a local web server at http://localhost:7860. To use a different
 host port, set `HOST_PORT`, for example `HOST_PORT=7861 docker compose up -d --build`.
 
+### Prompt Customization
+
+Model-facing prompts live in `tradingagents/prompts/templates`. Edit those
+Markdown templates to tune analyst, researcher, trader, risk, signal extraction,
+and reflection behavior from one place. Templates are grouped by role:
+`analysts/`, `researchers/`, `managers/`, `trader/`, `risk/`, `trading_modes/`,
+`graph/`, and `shared/`.
+
+To keep custom prompts outside the repo, copy selected templates to another
+folder and set `TRADINGAGENTS_PROMPT_DIR` to that path. Keep the same group path
+for overrides, for example `analysts/market_system.md`. Missing files fall back
+to the bundled templates.
+
 #### Enhanced Web UI Features
 
 The web interface offers comprehensive trading and analysis capabilities:

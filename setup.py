@@ -2,7 +2,7 @@
 Setup script for the TradingAgents package.
 """
 
-from setuptools import setup, find_packages
+from setuptools import setup, find_namespace_packages
 
 setup(
     name="tradingagents",
@@ -11,7 +11,14 @@ setup(
     author="TradingAgents Team",
     author_email="yijia.xiao@cs.ucla.edu",
     url="https://github.com/TauricResearch",
-    packages=find_packages(),
+    packages=find_namespace_packages(include=["tradingagents*", "cli*", "webui*"]),
+    include_package_data=True,
+    package_data={
+        "tradingagents.prompts": [
+            "templates/*.md",
+            "templates/*/*.md",
+        ]
+    },
     install_requires=[
         "langchain>=0.1.0",
         "langchain-openai>=0.0.2",

@@ -2,6 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import AIMessage, ToolMessage
 import time
 import json
+from tradingagents.prompts import load_prompt, render_prompt
 
 # Import prompt capture utility
 try:
@@ -64,44 +65,19 @@ def create_news_analyst(llm, toolkit):
             " Do not request broad macro/global web searches unless OpenAI global web search is listed as an active source;"
             " the Macro analyst handles that context when enabled."
         )
-        system_message = (
-            f"You are a SWING TRADING news analyst specializing in identifying news events and market developments that could drive multi-day price movements for {ticker}. Focus on catalysts and sentiment shifts that affect swing trading positions (2-10 day holds)."
-            + " **SWING TRADING NEWS ANALYSIS:** \n"
-            + "1. **Multi-Day Catalyst Identification:** Events, announcements, and data releases that could sustain price trends over 2-10 days \n"
-            + "2. **Sentiment Trends:** Changes in market narrative, analyst sentiment, or sector rotation that persist across multiple days \n"
-            + "3. **Event Calendar:** Specific dates for earnings, FDA approvals, product launches, economic data during the swing holding period \n"
-            + "4. **Momentum Drivers:** News creating sustained multi-day price momentum suitable for swing positioning \n"
-            + "5. **Swing Risk Events:** Upcoming geopolitical developments, Fed decisions, sector-specific risks during the holding period \n"
-            + "6. **Sector & Relative Strength:** How similar companies and the broader sector are trending — multi-day momentum patterns \n"
-            + "**ANALYSIS PRIORITIES:** \n"
-            + "- Focus on news that could sustain or reverse a multi-day price swing \n"
-            + "- Identify both bullish and bearish catalysts over the coming 2-10 trading days \n"
-            + "- Assess news impact magnitude (minor <2%, moderate 2-5%, major >5% multi-day moves) \n"
-            + "- Consider news durability (will impact persist through the swing period?) \n"
-            + "- Analyze market reaction patterns to similar news for multi-day follow-through \n"
-            + global_news_guidance
-            + f"{source_guidance}\n"
-            + "**AVOID:** Generic market commentary, intraday noise. Focus on news with multi-day impact potential relevant to swing trades.\n"
-            + """ Make sure to append a Markdown table at the end organizing:
-| News Event | Date/Time | Impact Level | Price Direction | Swing Trading Implication |
-|------------|-----------|--------------|----------------|------------------------|\n
-| [Specific Event] | [Date/Time] | [High/Med/Low] | [Bullish/Bearish/Neutral] | [Entry/Exit/Hold Strategy] |
-
-Provide specific, actionable news analysis for swing trading decisions with clear timing and multi-day impact assessment."""
+        system_message = render_prompt(
+            "analysts/news_system",
+            ticker=ticker,
+            global_news_guidance=global_news_guidance,
+            source_guidance=source_guidance,
         )
+        asset_context = f"We are looking at the ticker: {ticker}"
 
         prompt = ChatPromptTemplate.from_messages(
             [
                 (
                     "system",
-                    "You are a helpful AI assistant, collaborating with other assistants."
-                    " Use the provided tools to progress towards answering the question."
-                    " If you are unable to fully answer, that's OK; another assistant with different tools"
-                    " will help where you left off. Execute what you can to make progress."
-                    " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
-                    " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
-                    " You have access to the following tools: {tool_names}.\n{system_message}"
-                    "For your reference, the current date is {current_date}. We are looking at the ticker: {ticker}",
+                    load_prompt("shared/analyst_tool_system"),
                 ),
                 MessagesPlaceholder(variable_name="messages"),
             ]
@@ -111,6 +87,7 @@ Provide specific, actionable news analysis for swing trading decisions with clea
         prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(ticker=ticker)
+        prompt = prompt.partial(asset_context=asset_context)
 
         # Capture the COMPLETE resolved prompt that gets sent to the LLM
         try:
@@ -124,11 +101,13 @@ Provide specific, actionable news analysis for swing trading decisions with clea
             else:
                 # Fallback: manually construct the complete prompt
                 tool_names_str = ", ".join([tool.name for tool in tools])
-                complete_prompt = f"""You are a helpful AI assistant, collaborating with other assistants. Use the provided tools to progress towards answering the question. If you are unable to fully answer, that's OK; another assistant with different tools will help where you left off. Execute what you can to make progress. If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable, prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop. You have access to the following tools: {tool_names_str}.
-
-{system_message}
-
-For your reference, the current date is {current_date}. We are looking at the ticekr: {ticker}"""
+                complete_prompt = render_prompt(
+                    "shared/analyst_tool_system",
+                    tool_names=tool_names_str,
+                    system_message=system_message,
+                    current_date=current_date,
+                    asset_context=asset_context,
+                )
             
             capture_agent_prompt("news_report", complete_prompt, ticker)
         except Exception as e:
@@ -224,12 +203,11 @@ For your reference, the current date is {current_date}. We are looking at the ti
         # Check if the result already contains FINAL TRANSACTION PROPOSAL
         if "FINAL TRANSACTION PROPOSAL:" not in result.content:
             # Create a simple prompt that includes the analysis content directly
-            final_prompt = f"""Based on the following news analysis for {ticker}, please provide your final trading recommendation considering the overall news sentiment and implications.
-
-Analysis:
-{result.content}
-
-You must conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** followed by a brief justification."""
+            final_prompt = render_prompt(
+                "analysts/news_final_recommendation",
+                ticker=ticker,
+                analysis_content=result.content,
+            )
             
             # Use a simple chain without tools for the final recommendation
             final_chain = llm

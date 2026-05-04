@@ -2,6 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import AIMessage, ToolMessage
 import time
 import json
+from tradingagents.prompts import load_prompt, render_prompt
 
 # Import prompt capture utility
 try:
@@ -34,50 +35,17 @@ def create_social_media_analyst(llm, toolkit):
             f" Active sources: {', '.join(source_labels)}."
             + (" Use `get_reddit_news(curr_date)` for crypto context." if is_crypto else " Use `get_reddit_stock_info(ticker, curr_date)` for stock context.")
         )
-        system_message = (
-            "You are a SWING TRADING social media analyst specializing in identifying sentiment shifts and social catalysts that could drive multi-day price movements. "
-            "Your role is to analyze social media posts, community sentiment, and social momentum indicators that affect swing trading positions (2-10 day holds).\n\n"
-            "**SWING TRADING SOCIAL MEDIA FOCUS:**\n"
-            "1. **Trending Sentiment:** Social sentiment trends that could sustain or reverse a multi-day price swing\n"
-            "2. **Sustained Catalysts:** Influencer mentions, viral campaigns, or trending hashtags with multi-day momentum\n"
-            "3. **Community Positioning:** Reddit, Twitter sentiment indicating retail trader conviction over the coming days\n"
-            "4. **Buzz Persistence:** Volume and duration of social discussions suggesting sustained moves vs. short-lived spikes\n"
-            "5. **Social Contrarian Signals:** Extreme social sentiment indicating potential multi-day reversals\n"
-            "6. **Narrative Durability:** How long the current social narrative is likely to persist and drive price action\n\n"
-            "**SWING TRADING ANALYSIS REQUIREMENTS:**\n"
-            "- **Sentiment Direction:** Current bullish/bearish/neutral social sentiment with recent trend\n"
-            "- **Momentum Indicators:** Social volume, engagement rates, viral potential for multi-day moves\n"
-            "- **Key Influencers:** Important social media accounts or communities driving sentiment shifts\n"
-            "- **Contrarian Opportunities:** Over-extended social sentiment suggesting mean reversion swings\n"
-            "- **Event Catalysts:** Social media events or announcements with multi-day trading implications\n"
-            "- **Risk Factors:** Social media risks that could impact swing positions negatively\n\n"
-            "**AVOID:** Intraday noise, one-off viral spikes with no follow-through. Focus on social factors "
-            "that create sustained multi-day moves relevant to swing trading.\n\n"
-            "Provide comprehensive social media sentiment analysis that swing traders can use for entry/exit timing and "
-            f"position sizing decisions. Always include specific social media examples and sentiment metrics when available.{source_guidance}"
-            + """ 
-
-**SWING TRADING SOCIAL SENTIMENT TABLE:**
-Make sure to append a Markdown table organizing:
-| Social Platform | Sentiment | Volume | Trend (Multi-Day) | Swing Trading Signal |
-|-----------------|-----------|---------|-------------------|---------------------|
-| [Platform] | [Bullish/Bearish/Neutral] | [High/Med/Low] | [Direction & Duration] | [Enter/Exit/Hold Strategy] |
-
-Focus on actionable social sentiment insights for swing trading decisions."""
+        system_message = render_prompt(
+            "analysts/social_system",
+            source_guidance=source_guidance,
         )
+        asset_context = f"The current company we want to analyze is {ticker}"
 
         prompt = ChatPromptTemplate.from_messages(
             [
                 (
                     "system",
-                    "You are a helpful AI assistant, collaborating with other assistants."
-                    " Use the provided tools to progress towards answering the question."
-                    " If you are unable to fully answer, that's OK; another assistant with different tools"
-                    " will help where you left off. Execute what you can to make progress."
-                    " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
-                    " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
-                    " You have access to the following tools: {tool_names}.\n{system_message}"
-                    "For your reference, the current date is {current_date}. The current company we want to analyze is {ticker}",
+                    load_prompt("shared/analyst_tool_system"),
                 ),
                 MessagesPlaceholder(variable_name="messages"),
             ]
@@ -87,6 +55,7 @@ Focus on actionable social sentiment insights for swing trading decisions."""
         prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(ticker=ticker)
+        prompt = prompt.partial(asset_context=asset_context)
 
         # Capture the COMPLETE resolved prompt that gets sent to the LLM
         try:
@@ -100,11 +69,13 @@ Focus on actionable social sentiment insights for swing trading decisions."""
             else:
                 # Fallback: manually construct the complete prompt
                 tool_names_str = ", ".join([tool.name for tool in tools])
-                complete_prompt = f"""You are a helpful AI assistant, collaborating with other assistants. Use the provided tools to progress towards answering the question. If you are unable to fully answer, that's OK; another assistant with different tools will help where you left off. Execute what you can to make progress. If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable, prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop. You have access to the following tools: {tool_names_str}.
-
-{system_message}
-
-For your reference, the current date is {current_date}. The current company we want to analyze is {ticker}"""
+                complete_prompt = render_prompt(
+                    "shared/analyst_tool_system",
+                    tool_names=tool_names_str,
+                    system_message=system_message,
+                    current_date=current_date,
+                    asset_context=asset_context,
+                )
             
             capture_agent_prompt("sentiment_report", complete_prompt, ticker)
         except Exception as e:
@@ -207,12 +178,11 @@ For your reference, the current date is {current_date}. The current company we w
         # Ensure we have a final recommendation without replacing tool-grounded evidence.
         if "FINAL TRANSACTION PROPOSAL:" not in analysis_content:
             # Create a final recommendation based on the analysis
-            final_prompt = f"""Based on the following social media and sentiment analysis for {ticker}, provide your final swing trading recommendation considering social momentum and sentiment indicators.
-
-Analysis:
-{analysis_content}
-
-Provide a brief justification and conclude with: FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**"""
+            final_prompt = render_prompt(
+                "analysts/social_final_recommendation",
+                ticker=ticker,
+                analysis_content=analysis_content,
+            )
             
             # Use a simple chain without tools for the final recommendation
             final_chain = llm
