@@ -132,8 +132,14 @@ def run_app(port=7860, share=False, server_name="127.0.0.1", debug=False, max_th
     return 0
 
 
-# Create the app instance for use by other modules
-app = create_app()
+def __getattr__(name):
+    # Lazy `app` attribute (PEP 562) so WSGI servers can still point at
+    # ``webui.app_dash:app`` while plain imports stay side-effect free:
+    # create_app() renders the account layout, which calls the Alpaca API.
+    if name == "app":
+        return create_app()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 if __name__ == "__main__":
-    run_app(debug=True) 
+    run_app(debug=True)
