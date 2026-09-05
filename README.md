@@ -39,9 +39,11 @@ AlpacaTradingAgent introduces powerful new capabilities specifically designed fo
 - **Parallel Execution**: All 5 analysts run simultaneously for faster analysis with configurable delays to prevent API overload
 
 ### 🧠 **Multi-Provider LLM Runtime**
-- **Current OpenAI Catalog**: Supports GPT-5.6 Sol/Terra/Luna, GPT-5.5, and GPT-5.4; cost-safe defaults remain `gpt-5.4-nano` and `gpt-5.4-mini`
+- **Current Model Catalog**: Supports GPT-6 Astra; Gemini 3.8; Claude Fable 5.1, Opus 5, and Sonnet 5; Grok 4.6; MiniMax M2.7; DeepSeek V4; Qwen 3.8; and GLM-5.2
 - **Provider Choice**: Supports OpenAI, local OpenAI-compatible endpoints, Google Gemini, Anthropic Claude, xAI, MiniMax, DeepSeek, Qwen, GLM, OpenRouter, Ollama, and Azure OpenAI
-- **Provider-Specific Controls**: Preserves GPT reasoning controls, Gemini thinking level, Claude effort, custom model IDs, and Azure deployment names
+- **Provider-Specific Controls**: Uses the OpenAI Responses API for GPT-6/GPT-5 reasoning models, validates Gemini thinking levels by family, sends Claude effort through native `output_config`, and exposes Grok reasoning effort
+- **Forward Compatibility**: Every provider accepts custom model IDs, while the built-in catalog remains curated from official provider documentation
+- **Cost-Safe Defaults**: Default models remain `gpt-5.4-nano` and `gpt-5.4-mini`; selecting a new flagship is explicit
 - **Local Compatibility**: `OPENAI_USE_LOCAL` and `OPENAI_BASE_URL` continue to route core LLM calls to a local OpenAI-compatible backend
 
 ### 🧾 **Structured Decisions, Memory, and Resume**
@@ -278,7 +280,7 @@ The web interface offers comprehensive trading and analysis capabilities:
 **LLM and Runtime Controls**
 - Select OpenAI, local OpenAI-compatible, Google, Anthropic, xAI, MiniMax, DeepSeek, Qwen, GLM, OpenRouter, Ollama, or Azure OpenAI
 - Configure custom model IDs for every major cloud provider and Azure deployment names, so newly released chat models work before the static catalog is refreshed
-- Tune GPT reasoning controls, Gemini thinking level, Claude effort, output language, and checkpoint resume
+- Tune GPT/Grok reasoning controls, Gemini thinking level, Claude effort, output language, and checkpoint resume
 
 ## AlpacaTradingAgent Package
 
@@ -352,8 +354,8 @@ For non-OpenAI providers, switch the provider and model IDs:
 ```python
 config = DEFAULT_CONFIG.copy()
 config["llm_provider"] = "google"
-config["quick_think_llm"] = "gemini-2.5-flash"
-config["deep_think_llm"] = "gemini-3.1-pro-preview"
+config["quick_think_llm"] = "gemini-3.8-flash"
+config["deep_think_llm"] = "gemini-3.8-flash"
 config["google_thinking_level"] = "high"
 
 ta = TradingAgentsGraph(debug=True, config=config)

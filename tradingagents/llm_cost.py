@@ -11,8 +11,9 @@ Honesty rules:
   ``llm_pricing_per_million`` config key.
 - Unknown models are never guessed: their tokens are surfaced separately
   as ``unpriced_tokens`` instead of silently costing $0.
-- Run logs do not record cache-read discounts, so estimates are an upper
-  bound on the true bill.
+- Run logs do not preserve every provider's cache, region, promotion, or
+  long-context pricing tier, so estimates are attribution aids rather than an
+  exact reproduction of the provider invoice.
 
 Everything here is pure file reading and arithmetic — zero network calls.
 """
@@ -28,6 +29,7 @@ from typing import Dict, List, Optional
 # `llm_pricing_per_million` config key when your bill disagrees.
 DEFAULT_PRICING_PER_MILLION: Dict[str, Dict[str, float]] = {
     # OpenAI
+    "gpt-6-astra": {"input": 10.00, "output": 50.00},
     "gpt-5.4-mini": {"input": 0.25, "output": 2.00},
     "gpt-5.4-nano": {"input": 0.05, "output": 0.40},
     "gpt-5-mini": {"input": 0.25, "output": 2.00},
@@ -41,18 +43,30 @@ DEFAULT_PRICING_PER_MILLION: Dict[str, Dict[str, float]] = {
     "o4-mini": {"input": 1.10, "output": 4.40},
     "o3": {"input": 2.00, "output": 8.00},
     # Anthropic
+    "claude-fable-5-1": {"input": 10.00, "output": 50.00},
+    "claude-fable-5": {"input": 10.00, "output": 50.00},
+    "claude-opus-5": {"input": 5.00, "output": 25.00},
+    "claude-sonnet-5": {"input": 2.00, "output": 10.00},
+    "claude-haiku-4-5": {"input": 1.00, "output": 5.00},
     "claude-3-5-haiku": {"input": 0.80, "output": 4.00},
     "claude-haiku": {"input": 0.80, "output": 4.00},
     "claude-sonnet": {"input": 3.00, "output": 15.00},
     "claude-opus": {"input": 15.00, "output": 75.00},
     "claude": {"input": 3.00, "output": 15.00},
     # DeepSeek
+    "deepseek-v4-pro": {"input": 0.435, "output": 0.87},
+    "deepseek-v4-flash": {"input": 0.14, "output": 0.28},
     "deepseek-chat": {"input": 0.27, "output": 1.10},
     "deepseek-reasoner": {"input": 0.55, "output": 2.19},
+    # MiniMax
+    "minimax-m2.7-highspeed": {"input": 0.60, "output": 2.40},
+    "minimax-m2.7": {"input": 0.30, "output": 1.20},
     # Google
     "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
     "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
     # xAI
+    "grok-4.6": {"input": 2.00, "output": 6.00},
+    "grok-4.20": {"input": 1.25, "output": 2.50},
     "grok-4": {"input": 3.00, "output": 15.00},
     "grok-3-mini": {"input": 0.30, "output": 0.50},
     "grok": {"input": 3.00, "output": 15.00},

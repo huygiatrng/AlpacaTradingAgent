@@ -515,7 +515,12 @@ def _model_setup():
                                 options=[
                                     {"label": "Provider default", "value": ""},
                                     {"label": "High thinking", "value": "high"},
-                                    {"label": "Minimal / disabled", "value": "minimal"},
+                                    {"label": "Medium thinking", "value": "medium"},
+                                    {"label": "Low thinking", "value": "low"},
+                                    {
+                                        "label": "Minimal (uses low when unsupported)",
+                                        "value": "minimal",
+                                    },
                                 ],
                                 value="",
                                 className="config-select",
@@ -532,6 +537,8 @@ def _model_setup():
                                 id="anthropic-effort",
                                 options=[
                                     {"label": "Provider default", "value": ""},
+                                    {"label": "Max", "value": "max"},
+                                    {"label": "Extra high", "value": "xhigh"},
                                     {"label": "High", "value": "high"},
                                     {"label": "Medium", "value": "medium"},
                                     {"label": "Low", "value": "low"},
@@ -542,6 +549,26 @@ def _model_setup():
                             "gauge-high",
                         ),
                         id="anthropic-effort-group",
+                        style={"display": "none"},
+                    ),
+                    html.Div(
+                        _field(
+                            "Grok reasoning",
+                            dbc.Select(
+                                id="xai-reasoning-effort",
+                                options=[
+                                    {"label": "Provider default", "value": ""},
+                                    {"label": "Extra high", "value": "xhigh"},
+                                    {"label": "High", "value": "high"},
+                                    {"label": "Medium", "value": "medium"},
+                                    {"label": "Low", "value": "low"},
+                                ],
+                                value="",
+                                className="config-select",
+                            ),
+                            "gauge-high",
+                        ),
+                        id="xai-reasoning-effort-group",
                         style={"display": "none"},
                     ),
                 ],

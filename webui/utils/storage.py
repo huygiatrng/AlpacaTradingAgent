@@ -30,6 +30,7 @@ DEFAULT_SETTINGS = {
     "deep_llm_custom_model": "",
     "google_thinking_level": "",
     "anthropic_effort": "",
+    "xai_reasoning_effort": "",
 }
 
 # Default API keys structure (empty by default, loaded from localStorage or .env)
