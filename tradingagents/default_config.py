@@ -44,6 +44,7 @@ DEFAULT_CONFIG = {
     "google_thinking_level": None,
     "openai_reasoning_effort": None,
     "anthropic_effort": None,
+    "xai_reasoning_effort": None,
     "output_language": "English",
     "deep_llm_params": {
         "reasoning_effort": "medium",

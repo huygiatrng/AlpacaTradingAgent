@@ -113,6 +113,7 @@ class MockedTradingGraphTests(unittest.TestCase):
         cases = [
             ("google", {"google_thinking_level": "high"}, "thinking_level", "high"),
             ("anthropic", {"anthropic_effort": "medium"}, "effort", "medium"),
+            ("xai", {"xai_reasoning_effort": "xhigh"}, "reasoning_effort", "xhigh"),
         ]
 
         for provider, provider_config, expected_key, expected_value in cases:

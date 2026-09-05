@@ -59,6 +59,20 @@ class PricingTests(unittest.TestCase):
     def test_unknown_model_is_unpriced(self):
         self.assertIsNone(resolve_pricing("totally-unknown-llm-9000"))
 
+    def test_latest_flagship_prices_use_exact_provider_rates(self):
+        self.assertEqual(resolve_pricing("gpt-6-astra"), {"input": 10.0, "output": 50.0})
+        self.assertEqual(
+            resolve_pricing("claude-fable-5-1"),
+            {"input": 10.0, "output": 50.0},
+        )
+        self.assertEqual(resolve_pricing("grok-4.6"), {"input": 2.0, "output": 6.0})
+        self.assertEqual(resolve_pricing("grok-4.20"), {"input": 1.25, "output": 2.5})
+        self.assertEqual(resolve_pricing("MiniMax-M2.7"), {"input": 0.3, "output": 1.2})
+        self.assertEqual(
+            resolve_pricing("deepseek-v4-pro"),
+            {"input": 0.435, "output": 0.87},
+        )
+
     def test_config_override_beats_defaults(self):
         overrides = {"gpt-5-mini": {"input": 1.0, "output": 2.0}}
         priced = resolve_pricing("gpt-5-mini", overrides=overrides)

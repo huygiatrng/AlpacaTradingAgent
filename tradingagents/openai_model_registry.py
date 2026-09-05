@@ -100,6 +100,17 @@ def _reasoning_spec(
 
 
 MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
+    "gpt-6-astra": _reasoning_spec(
+        model_id="gpt-6-astra",
+        label="GPT-6 Astra - latest flagship",
+        description="Latest OpenAI flagship for complex, demanding work.",
+        reasoning_effort_options=["low", "medium", "high", "xhigh", "max"],
+        role_defaults={
+            "quick": {"reasoning_effort": "low", "text_verbosity": "low"},
+            "deep": {"reasoning_effort": "high", "text_verbosity": "medium"},
+        },
+        price_hint="latest flagship",
+    ),
     "gpt-5.6-sol": _reasoning_spec(
         model_id="gpt-5.6-sol",
         label="GPT-5.6 Sol - latest frontier",
@@ -313,15 +324,20 @@ def get_model_spec(model_name: str) -> Dict[str, Any]:
     # discovery catalog is refreshed. Current numbered GPT families expose the
     # Responses API, which preserves reasoning and verbosity controls.
     if re.fullmatch(
-        r"gpt-\d+(?:\.\d+)+(?:-(?:sol|terra|luna|pro|mini|nano))?(?:-\d{4}-\d{2}-\d{2})?",
+        r"gpt-\d+(?:\.\d+)*(?:-(?:astra|sol|terra|luna|pro|mini|nano))?(?:-\d{4}-\d{2}-\d{2})?",
         model,
         flags=re.IGNORECASE,
     ):
+        major_match = re.match(r"gpt-(\d+)", model, flags=re.IGNORECASE)
+        major_version = int(major_match.group(1)) if major_match else 0
+        effort_options = ["low", "medium", "high", "xhigh", "max"]
+        if major_version < 6:
+            effort_options.insert(0, "none")
         return _reasoning_spec(
             model_id=model,
             label=model,
             description="Forward-compatible OpenAI numbered reasoning model.",
-            reasoning_effort_options=["none", "low", "medium", "high", "xhigh", "max"],
+            reasoning_effort_options=effort_options,
             role_defaults={
                 "quick": {"reasoning_effort": "low", "text_verbosity": "low"},
                 "deep": {"reasoning_effort": "high", "text_verbosity": "medium"},
@@ -378,8 +394,8 @@ PROVIDER_UI_METADATA: Dict[str, Dict[str, Any]] = {
         "endpoint_placeholder": "Uses OpenAI default endpoint",
         "backend_visible": False,
         "custom_models": True,
-        "summary": "GPT-5.6 and earlier reasoning controls, plus forward-compatible custom model IDs.",
-        "pills": ["GPT-5.6 catalog", "custom future models"],
+        "summary": "GPT-6 and GPT-5 reasoning controls, plus forward-compatible custom model IDs.",
+        "pills": ["GPT-6 Astra", "Responses API", "custom future models"],
     },
     "local_openai": {
         "title": "Local OpenAI-compatible",
@@ -399,7 +415,7 @@ PROVIDER_UI_METADATA: Dict[str, Dict[str, Any]] = {
         "backend_visible": False,
         "custom_models": True,
         "summary": "Gemini models use a provider-level thinking mode instead of OpenAI reasoning controls.",
-        "pills": ["thinking mode", "Gemini 2.5/3.x", "custom future models"],
+        "pills": ["thinking mode", "Gemini 3.8", "custom future models"],
     },
     "anthropic": {
         "title": "Anthropic Claude",
@@ -418,8 +434,8 @@ PROVIDER_UI_METADATA: Dict[str, Dict[str, Any]] = {
         "endpoint_placeholder": "https://api.x.ai/v1",
         "backend_visible": True,
         "custom_models": True,
-        "summary": "OpenAI-compatible Grok endpoint. Override the endpoint only for proxies.",
-        "pills": ["Grok 4.5/4.3", "custom future models"],
+        "summary": "OpenAI-compatible Grok endpoint with provider-native reasoning effort.",
+        "pills": ["Grok 4.6", "reasoning effort", "custom future models"],
     },
     "minimax": {
         "title": "MiniMax",

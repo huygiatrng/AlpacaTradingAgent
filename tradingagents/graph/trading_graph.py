@@ -188,6 +188,8 @@ class TradingAgentsGraph:
             kwargs["reasoning_effort"] = self.config["openai_reasoning_effort"]
         elif provider == "anthropic" and self.config.get("anthropic_effort"):
             kwargs["effort"] = self.config["anthropic_effort"]
+        elif provider == "xai" and self.config.get("xai_reasoning_effort"):
+            kwargs["reasoning_effort"] = self.config["xai_reasoning_effort"]
         return kwargs
 
     def _graph_for_run(self, ticker: str, trade_date: str):

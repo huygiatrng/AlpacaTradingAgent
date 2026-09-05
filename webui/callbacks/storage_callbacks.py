@@ -41,6 +41,7 @@ def register_storage_callbacks(app):
             Input("deep-llm-custom-model", "value"),
             Input("google-thinking-level", "value"),
             Input("anthropic-effort", "value"),
+            Input("xai-reasoning-effort", "value"),
         ],
         [
             State("settings-store", "data"),
@@ -55,7 +56,7 @@ def register_storage_callbacks(app):
                      trade_after_analyze, trade_dollar_amount,
                      llm_provider, backend_url, output_language, checkpoint_enabled,
                      quick_llm, deep_llm, quick_llm_custom_model, deep_llm_custom_model,
-                     google_thinking_level, anthropic_effort,
+                     google_thinking_level, anthropic_effort, xai_reasoning_effort,
                      current_settings, loop_enabled, market_hour_enabled):
         """Save settings to localStorage store"""
         
@@ -88,6 +89,7 @@ def register_storage_callbacks(app):
             "deep_llm_custom_model": deep_llm_custom_model or "",
             "google_thinking_level": google_thinking_level or "",
             "anthropic_effort": anthropic_effort or "",
+            "xai_reasoning_effort": xai_reasoning_effort or "",
         }
         
         # Check if settings actually changed to prevent circular updates

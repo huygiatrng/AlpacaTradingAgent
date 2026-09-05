@@ -11,6 +11,17 @@ class NormalizedChatAnthropic(ChatAnthropic):
     def invoke(self, input, config=None, **kwargs):
         return normalize_content(super().invoke(input, config, **kwargs))
 
+    def with_structured_output(self, schema, *, method=None, **kwargs):
+        # Fable 5.1 rejects forced tool_choice values. Its native JSON Schema
+        # output is the supported way to guarantee structured responses.
+        if method is None and str(self.model).startswith("claude-fable-5-1"):
+            method = "json_schema"
+        return super().with_structured_output(
+            schema,
+            method=method or "function_calling",
+            **kwargs,
+        )
+
 
 class AnthropicClient(BaseLLMClient):
     def get_llm(self) -> Any:

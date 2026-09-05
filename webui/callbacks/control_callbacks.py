@@ -275,6 +275,7 @@ def register_control_callbacks(app):
             Output("llm-provider-info", "children"),
             Output("google-thinking-level-group", "style"),
             Output("anthropic-effort-group", "style"),
+            Output("xai-reasoning-effort-group", "style"),
         ],
         [Input("llm-provider", "value")],
         [State("quick-llm", "value"), State("deep-llm", "value")],
@@ -298,6 +299,7 @@ def register_control_callbacks(app):
         backend_style = {} if metadata.get("backend_visible") else {"display": "none"}
         google_style = {} if provider == "google" else {"display": "none"}
         anthropic_style = {} if provider == "anthropic" else {"display": "none"}
+        xai_style = {} if provider == "xai" else {"display": "none"}
         return (
             quick_options,
             quick_value,
@@ -308,6 +310,7 @@ def register_control_callbacks(app):
             provider_info,
             google_style,
             anthropic_style,
+            xai_style,
         )
 
     @app.callback(
@@ -729,6 +732,7 @@ def register_control_callbacks(app):
          State("deep-llm-custom-model", "value"),
          State("google-thinking-level", "value"),
          State("anthropic-effort", "value"),
+         State("xai-reasoning-effort", "value"),
          State("quick-llm-reasoning-effort", "value"),
          State("quick-llm-verbosity", "value"),
          State("quick-llm-summary", "value"),
@@ -757,7 +761,7 @@ def register_control_callbacks(app):
                                analysts_fundamentals, analysts_macro, research_depth,
                                llm_provider, backend_url, output_language, checkpoint_enabled,
                                quick_llm, deep_llm, quick_llm_custom_model, deep_llm_custom_model,
-                               google_thinking_level, anthropic_effort,
+                               google_thinking_level, anthropic_effort, xai_reasoning_effort,
                                quick_reasoning_effort, quick_verbosity, quick_summary, quick_temperature,
                                quick_top_p, quick_max_output_tokens, quick_store, quick_parallel_tool_calls,
                                deep_reasoning_effort, deep_verbosity, deep_summary, deep_temperature,
@@ -859,6 +863,7 @@ def register_control_callbacks(app):
         provider_settings = {
             "google_thinking_level": google_thinking_level or None,
             "anthropic_effort": anthropic_effort or None,
+            "xai_reasoning_effort": xai_reasoning_effort or None,
         }
 
         # Set loop configuration
