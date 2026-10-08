@@ -1,6 +1,8 @@
 """Macro data must preserve historical evidence and surface provider failures."""
 
+import threading
 from datetime import datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import patch
 
 import pytest
@@ -241,3 +243,118 @@ def test_final_page_at_request_limit_is_complete_and_pins_dataset():
         result = fx._fetch_rows("/forex/eur/usd", {})
     assert result["data"] == [{"val": 2}, {"val": 1}]
     assert seen[1]["dataset_version"] == "v1"
+
+
+class RedirectHandler(BaseHTTPRequestHandler):
+    requested = []
+    redirect_status = 302
+
+    def do_GET(self):
+        self.requested.append(self.path)
+        self.send_response(self.redirect_status)
+        self.send_header("Location", "/elsewhere")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+def test_redirect_is_not_followed_so_key_is_not_forwarded(status):
+    RedirectHandler.requested = []
+    RedirectHandler.redirect_status = status
+    server = HTTPServer(("127.0.0.1", 0), RedirectHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with patch.object(fx, "BASE_URL", f"http://127.0.0.1:{server.server_port}/v1"), patch.object(
+            fx, "get_fxmacrodata_api_key", return_value="test-key"
+        ):
+            result = fx._fxmacrodata_get("/calendar/usd")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    assert RedirectHandler.requested == ["/v1/calendar/usd"], "Redirect target must not be requested"
+    assert "redirect" in result["error"]
+    assert "test-key" not in str(result)
+
+
+@pytest.mark.parametrize("api_key", ["test-key\r\nX-Injected: 1", "test key", "test-key\x00"])
+def test_malformed_key_is_rejected_without_echoing_it(api_key):
+    with patch.object(fx, "get_fxmacrodata_api_key", return_value=api_key), patch.object(
+        fx.requests, "get", side_effect=AssertionError("no request expected")
+    ):
+        result = fx._fxmacrodata_get("/calendar/gbp")
+        report = fx.get_economic_release_calendar("2026-10-01", "GBP")
+    assert result.get("error") and "whitespace or control" in result["error"]
+    assert "test" not in str(result), "Key must never reach text returned to the model"
+    assert api_key not in report and "test-key" not in report
+
+
+def test_surrounding_whitespace_is_stripped_from_key():
+    with patch.object(fx, "get_fxmacrodata_api_key", return_value="  test-key\n"), patch.object(
+        fx.requests, "get", return_value=Response({"data": []})
+    ) as get:
+        fx._fxmacrodata_get("/calendar/usd")
+    assert get.call_args.kwargs["headers"]["X-API-Key"] == "test-key"
+    assert get.call_args.kwargs["allow_redirects"] is False
+
+
+def test_error_body_on_success_status_includes_api_detail():
+    with patch.object(fx, "get_fxmacrodata_api_key", return_value=None), patch.object(
+        fx.requests, "get", return_value=Response({"detail": "Unknown indicator"})
+    ):
+        result = fx._fxmacrodata_get("/announcements/usd/gdp")
+    assert "Unknown indicator" in result["error"]
+
+
+@pytest.mark.parametrize("status", [200, 400])
+def test_provider_error_detail_redacts_the_api_key_in_reports(status):
+    response = Response({"detail": "Rejected credential DUMMY_SECRET_52"})
+    response.status_code = status
+    with patch.object(fx, "get_fxmacrodata_api_key", return_value="DUMMY_SECRET_52"), patch.object(
+        fx.requests, "get", return_value=response
+    ):
+        result = fx._fxmacrodata_get("/calendar/gbp")
+        report = fx.get_economic_release_calendar("2026-10-07", "GBP")
+    assert result.get("error")
+    assert "Rejected credential" in result["error"]
+    assert "DUMMY_SECRET_52" not in str(result)
+    assert "DUMMY_SECRET_52" not in report
+
+
+def test_http_reason_redacts_the_api_key():
+    response = Response({})
+    response.status_code = 400
+    response.reason = "Rejected DUMMY_SECRET_52"
+    with patch.object(fx, "get_fxmacrodata_api_key", return_value="DUMMY_SECRET_52"), patch.object(
+        fx.requests, "get", return_value=response
+    ):
+        result = fx._fxmacrodata_get("/calendar/gbp")
+    assert result.get("error") and "DUMMY_SECRET_52" not in str(result)
+
+
+@pytest.mark.parametrize("error", [
+    requests.exceptions.InvalidHeader("Invalid credential DUMMY_SECRET_52"),
+    requests.exceptions.Timeout("Request using DUMMY_SECRET_52 timed out"),
+    UnicodeEncodeError("latin-1", "DUMMY_SECRET_52\u2603", 15, 16, "cannot encode"),
+])
+def test_transport_failures_never_echo_credentials(error):
+    with patch.object(fx, "get_fxmacrodata_api_key", return_value="DUMMY_SECRET_52"), patch.object(
+        fx.requests, "get", side_effect=error
+    ):
+        result = fx._fxmacrodata_get("/calendar/gbp")
+    assert result.get("error")
+    assert type(error).__name__ in result["error"]
+    assert "DUMMY_SECRET_52" not in str(result)
+
+
+@pytest.mark.parametrize("key", ["DUMMY_SECRET_52\u2603", 123, True])
+def test_invalid_header_key_is_rejected_before_transport(key):
+    with patch.object(fx, "get_fxmacrodata_api_key", return_value=key), patch.object(fx.requests, "get") as get:
+        result = fx._fxmacrodata_get("/calendar/gbp")
+    get.assert_not_called()
+    assert result.get("error") and result.get("key_required")
+    assert "DUMMY_SECRET_52" not in str(result)

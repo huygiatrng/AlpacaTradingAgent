@@ -12,8 +12,10 @@ FXMACRODATA_API_KEY.
 """
 
 from datetime import datetime, timedelta, timezone
+import json
 import math
 from typing import Dict, List, Optional
+from urllib.parse import quote
 
 import requests
 
@@ -40,22 +42,58 @@ DEFAULT_CURRENCIES = ["USD", "EUR", "GBP", "JPY"]
 DEFAULT_FX_PAIRS = ["EUR/USD", "USD/JPY", "GBP/USD"]
 
 
+def _redact_error_detail(detail, api_key: str) -> str:
+    """Preserve useful provider diagnostics while removing echoed credentials."""
+    text = detail if isinstance(detail, str) else json.dumps(detail, ensure_ascii=False)
+    if api_key:
+        for secret in {api_key, json.dumps(api_key)[1:-1], quote(api_key, safe="")}:
+            text = text.replace(secret, "[REDACTED]")
+    return text
+
+
 def _fxmacrodata_get(path: str, params: Optional[Dict] = None) -> Dict:
     """GET an FXMacroData endpoint. Returns the JSON body or {"error": ...}."""
     headers = {"Accept": "application/json"}
     api_key = get_fxmacrodata_api_key()
+    if api_key is not None and not isinstance(api_key, str):
+        return {"error": "FXMACRODATA_API_KEY must be a string.", "key_required": True}
+    api_key = (api_key or "").strip()
     if api_key:
+        # requests echoes an invalid header value in its exception message, and
+        # that message is returned to the model, so never let the key reach it.
+        if any(char.isspace() or not char.isprintable() for char in api_key):
+            return {
+                "error": "FXMACRODATA_API_KEY contains whitespace or control characters.",
+                "key_required": True,
+            }
+        try:
+            api_key.encode("latin-1")  # Encoding used by the HTTP transport.
+        except UnicodeEncodeError:
+            return {
+                "error": "FXMACRODATA_API_KEY cannot be encoded as an HTTP header.",
+                "key_required": True,
+            }
         headers["X-API-Key"] = api_key
 
     try:
+        # requests only strips Authorization on a cross-host redirect, so a
+        # followed redirect would forward X-API-Key to the new host.
         response = requests.get(
             f"{BASE_URL}{path}",
             params=params or {},
             headers=headers,
             timeout=REQUEST_TIMEOUT,
+            allow_redirects=False,
         )
-    except requests.exceptions.RequestException as e:
-        return {"error": f"Failed to fetch FXMacroData {path}: {str(e)}"}
+    except (requests.exceptions.RequestException, UnicodeError) as e:
+        # Even a well-formed credential may be echoed by a transport adapter.
+        return {"error": f"Failed to fetch FXMacroData {path}: {type(e).__name__}"}
+
+    if 300 <= response.status_code < 400:
+        return {
+            "error": f"FXMacroData {path} returned a redirect (HTTP {response.status_code}), which is not followed.",
+            "status_code": response.status_code,
+        }
 
     invalid_json = False
     try:
@@ -74,11 +112,14 @@ def _fxmacrodata_get(path: str, params: Optional[Dict] = None) -> Dict:
     if response.status_code >= 400:
         detail = body.get("detail") if isinstance(body, dict) else None
         return {
-            "error": f"FXMacroData {path} returned HTTP {response.status_code}: {detail or response.reason}",
+            "error": f"FXMacroData {path} returned HTTP {response.status_code}: "
+                     f"{_redact_error_detail(detail or response.reason, api_key)}",
             "status_code": response.status_code,
         }
     if invalid_json or not _valid_payload(body, path):
-        return {"error": f"FXMacroData {path} returned an invalid JSON data response."}
+        detail = body.get("detail") if isinstance(body, dict) else None
+        suffix = f": {_redact_error_detail(detail, api_key)}" if isinstance(detail, str) else "."
+        return {"error": f"FXMacroData {path} returned an invalid JSON data response{suffix}"}
     return body
 
 

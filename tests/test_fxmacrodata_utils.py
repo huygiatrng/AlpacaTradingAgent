@@ -39,7 +39,8 @@ class FXMacroDataUtilsTests(unittest.TestCase):
         self.addCleanup(historical.stop)
 
     def _router(self, routes):
-        def fake_get(url, params=None, headers=None, timeout=None):
+        def fake_get(url, params=None, headers=None, timeout=None, allow_redirects=True):
+            self.assertFalse(allow_redirects)
             self.calls.append({"url": url, "params": dict(params or {}), "headers": dict(headers or {})})
             path = url.replace(fxmacrodata_utils.BASE_URL, "")
             handler = routes.get(path)
