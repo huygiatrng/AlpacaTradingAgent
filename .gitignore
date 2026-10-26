@@ -11,3 +11,8 @@ data/
 build/
 dist/
 .playwright-cli/
+output/
+postman/skills/
+.postman/skills.json
+postman/environments/*.local.*
+postman/reports/

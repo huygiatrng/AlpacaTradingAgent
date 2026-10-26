@@ -1,0 +1,23 @@
+$kind: http-request
+id: 64be5c51-48ed-c3bb-7e90-8a3b784a7558
+url: 'https://paper-api.alpaca.markets/v2/account'
+method: GET
+order: 1000
+settings:
+  followRedirects: false
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Account identity and numeric risk inputs are available', () => {
+        const account = pm.response.json();
+        pm.expect(typeof account.id === 'string' && account.id.length > 0).to.equal(true);
+        ['equity', 'last_equity', 'buying_power', 'cash'].forEach(field => {
+          pm.expect(typeof account[field] === 'string' && account[field].trim() !== '' && Number.isFinite(Number(account[field])), field).to.equal(true);
+        });
+      });
+      pm.test('Account is active and has no broker trading blocks', () => {
+        const account = pm.response.json();
+        pm.expect(account.status).to.equal('ACTIVE');
+        ['trading_blocked', 'account_blocked', 'trade_suspended_by_user'].forEach(field => pm.expect(account[field], field).to.equal(false));
+      });

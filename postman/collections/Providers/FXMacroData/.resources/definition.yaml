@@ -1,0 +1,15 @@
+$kind: collection
+id: 69a81dd0-f68c-4c90-8248-4c19ba443e9a
+order: 6000
+scripts:
+  - type: http:beforeRequest
+    language: text/javascript
+    code: |-
+      const names = ["FXMACRODATA_API_KEY"];
+      const configured = names.filter(name => pm.variables.get(name));
+      if (configured.length === 0) {
+        console.warn('SKIPPED FXMacroData: credentials are not configured.');
+        pm.execution.skipRequest();
+      } else {
+        pm.request.headers.upsert({key: 'X-API-Key', value: '' + pm.variables.get('FXMACRODATA_API_KEY')});
+      }

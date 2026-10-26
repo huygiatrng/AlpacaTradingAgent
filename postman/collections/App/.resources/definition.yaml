@@ -1,0 +1,9 @@
+$kind: collection
+id: f8fb05b2-c79a-467f-ac6e-8ed2e4fd1298
+name: AlpacaTradingAgent - App
+description: Read-only checks of the running dashboard. No broker requests or Dash actions are submitted.
+scripts:
+  - type: http:afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));

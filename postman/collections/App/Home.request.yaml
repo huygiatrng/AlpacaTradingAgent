@@ -1,0 +1,17 @@
+$kind: http-request
+id: 2e66863e-f836-4786-8a30-212afe9af4df
+url: '{{app_url}}/'
+method: GET
+order: 1000
+settings:
+  followRedirects: false
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Dashboard HTML and local styles are available', () => {
+        pm.expect(pm.response.headers.get('Content-Type')).to.include('text/html');
+        const html = pm.response.text();
+        pm.expect(html.includes('_dash-config')).to.equal(true);
+        pm.expect(html.includes('/assets/vendor/bootstrap.min.css')).to.equal(true);
+      });

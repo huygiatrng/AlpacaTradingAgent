@@ -1,0 +1,19 @@
+$kind: http-request
+id: f6488a14-f5a0-4227-926a-f16a79fe483b
+url: '{{app_url}}/_dash-dependencies'
+method: GET
+order: 3000
+settings:
+  followRedirects: false
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Provider changes refresh connection diagnostics', () => {
+        const callbacks = pm.response.json();
+        pm.expect(Array.isArray(callbacks)).to.equal(true);
+        pm.expect(callbacks.some(callback =>
+          callback.output === 'connection-results.data' &&
+          callback.inputs.some(input => input.id === 'llm-provider' && input.property === 'value')
+        )).to.equal(true);
+      });

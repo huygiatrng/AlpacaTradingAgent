@@ -1,0 +1,30 @@
+$kind: collection
+id: 5a49dbbe-19fd-4923-bd10-fb78383220ca
+name: AlpacaTradingAgent - Providers
+description: Read-only checks of the selected AI provider, paper brokerage and market data. Run configured folders; no orders or paid model generation.
+variables:
+  - key: symbol
+    value: AAPL
+  - key: fred_series
+    value: FEDFUNDS
+scripts:
+  - type: http:beforeRequest
+    language: text/javascript
+    code: |-
+      const today = new Date();
+      const lastWeek = new Date(today.getTime() - 7 * 86400000);
+      pm.variables.set('today', today.toISOString().slice(0, 10));
+      pm.variables.set('last_week', lastWeek.toISOString().slice(0, 10));
+  - type: http:afterResponse
+    language: text/javascript
+    code: |-
+      const hints = {
+        401: 'Key rejected; replace this service key.',
+        403: 'Access denied; check permissions, region or subscription.',
+        429: 'Rate or credit limit; check billing or retry later.'
+      };
+      pm.test(hints[pm.response.code] || 'HTTP 200', () => pm.response.to.have.status(200));
+      pm.test('JSON response without a provider error or quota message', () => {
+        const body = pm.response.json();
+        pm.expect(Boolean(body && (body.error || body['Error Message'] || body.Note || body.Information || body.Response === 'Error'))).to.equal(false);
+      });

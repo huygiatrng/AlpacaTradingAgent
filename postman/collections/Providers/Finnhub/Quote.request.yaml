@@ -1,0 +1,19 @@
+$kind: http-request
+id: 150c6269-3948-bf97-acca-4b2dce1d3f70
+url: 'https://finnhub.io/api/v1/quote?symbol={{symbol}}'
+method: GET
+order: 1000
+settings:
+  followRedirects: false
+queryParams:
+  - key: symbol
+    value: '{{symbol}}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Quote contains a positive price and a timestamp', () => {
+        const quote = pm.response.json();
+        pm.expect(Number.isFinite(quote.c) && quote.c > 0).to.equal(true);
+        pm.expect(Number.isFinite(quote.t) && quote.t > 0).to.equal(true);
+      });

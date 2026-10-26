@@ -9,3 +9,7 @@ Keep source code, comments, documentation, tests, commit messages, and pull requ
 # Runtime verification
 
 Use any suitable available tools to test the running application. Browser testing is not restricted to IronBee DevTools or any other vendor.
+
+# API checks
+
+Keep reusable HTTP checks in `postman/collections/` and their usage in `postman/README.md`. Reuse existing collections instead of adding duplicate exports or generated vendor specifications. Never commit credentials, captured account data, or API run reports. Keep provider checks read-only; test order execution and failure handling with the isolated Python integration tests.

@@ -1,0 +1,13 @@
+$kind: collection
+id: 7e439d9c-6bd0-4477-af6f-3ff2a815438a
+order: 4000
+scripts:
+  - type: http:beforeRequest
+    language: text/javascript
+    code: |-
+      const names = ["FRED_API_KEY"];
+      const configured = names.filter(name => pm.variables.get(name));
+      if (configured.length === 0) {
+        console.warn('SKIPPED FRED: credentials are not configured.');
+        pm.execution.skipRequest();
+      }

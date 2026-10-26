@@ -40,3 +40,24 @@ jobs:
         # not pip-installable). No API keys are configured on purpose: the
         # suite must stay runnable offline.
         run: python -m pytest tests/ -v --tb=short
+
+  postman:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install API test tools
+        run: |
+          npm install -g postman-cli@1.77.0
+          pip install -r requirements.txt pytest
+      - name: Lint maintained collections and environment
+        run: python scripts/check_apis.py lint
+      - name: Check the isolated running app
+        run: python -m pytest tests/test_postman_checks.py -v --tb=short

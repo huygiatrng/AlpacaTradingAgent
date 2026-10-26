@@ -373,6 +373,10 @@ print(decision)
 
 ## Contributing
 
+### API checks
+
+The [Postman setup](postman/README.md) provides two maintained collections for the running app and its external providers. Run `python scripts/check_apis.py app` for the local dashboard or `python scripts/check_apis.py providers --provider openai` for configured services. Checks are read-only, credentials stay local, and skipped services are reported explicitly.
+
 We welcome contributions from the community! AlpacaTradingAgent is an independent project that builds upon concepts from the original TradingAgents framework, continuously evolving with new features for Alpaca integration and multi-asset support.
 
 ## Acknowledgments
