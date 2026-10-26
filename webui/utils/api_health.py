@@ -24,7 +24,7 @@ LLM_ENDPOINTS = {
 }
 STATUS_LABELS = {"connected": "Connected", "missing": "Not configured", "invalid": "Key rejected",
                  "permission": "Access denied", "limited": "Rate or credit limit", "unavailable": "Unavailable",
-                 "configuration": "Check settings", "unverified": "Needs a model test"}
+                 "configuration": "Check settings", "unverified": "Needs a model test", "optional": "Not in use"}
 
 
 def result(service, status, message, action=""):
@@ -109,21 +109,22 @@ def resolved_keys(stored):
 
 
 def check_connections(stored=None, provider="openai", backend_url=""):
-    """Check configured services plus the selected LLM and essential data sources."""
+    """Check the selected AI provider and configured data services."""
+    from tradingagents.openai_model_registry import get_provider_ui_metadata
+
     keys = resolved_keys(stored)
     jobs = []
     missing = []
     selected = provider or "openai"
-    for llm in [*LLM_ENDPOINTS, "azure"]:
+    for llm in [selected]:
+        title = "AI · " + get_provider_ui_metadata(llm)["title"]
         key_id = LLM_KEYS.get(llm, llm)
-        key = keys.get(key_id)
+        key = keys.get("openai" if llm == "local_openai" else key_id)
         local = llm in {"local_openai", "ollama"}
-        if local and llm != selected:
-            continue
         if not local and not valid_key(key):
             if llm == selected:
-                missing.append(result(llm, "missing", "A key is required for your selected model provider.",
-                                      "Open API setup, add a key, and save; or select another provider."))
+                missing.append(result(title, "missing", "Your selected AI provider needs a key.",
+                                      "Add its key in API setup, or choose another provider under LLM Models."))
             continue
         endpoint = (backend_url.strip() if llm == selected and backend_url else "")
         endpoint = endpoint or (os.getenv("AZURE_OPENAI_ENDPOINT", "") if llm == "azure" else LLM_ENDPOINTS[llm])
@@ -133,13 +134,13 @@ def check_connections(stored=None, provider="openai", backend_url=""):
         elif llm == "anthropic":
             headers = {"x-api-key": key.strip(), "anthropic-version": "2023-06-01"}
         elif llm == "azure":
-            missing.append(result("azure", "unverified", "Azure requires a deployment-specific model test.",
+            missing.append(result(title, "unverified", "Azure requires a deployment-specific model test.",
                                   "Set the endpoint and deployment, then test the selected models."))
             continue
         # OpenRouter's public model catalog does not authenticate the supplied key.
         path = "/key" if llm == "openrouter" else "/models"
         expected = (lambda data: "data" in data) if llm != "google" else (lambda data: "models" in data)
-        jobs.append((llm, endpoint.rstrip("/") + path, headers, None, expected))
+        jobs.append((title, endpoint.rstrip("/") + path, headers, None, expected))
 
     alpaca_key, secret = keys.get("alpaca-key"), keys.get("alpaca-secret")
     if valid_key(alpaca_key) and valid_key(secret):
@@ -148,9 +149,12 @@ def check_connections(stored=None, provider="openai", backend_url=""):
         jobs.append(("Alpaca paper" if paper else "Alpaca live", endpoint + "/v2/account",
                      {"APCA-API-KEY-ID": alpaca_key.strip(), "APCA-API-SECRET-KEY": secret.strip()}, None,
                      lambda data: "status" in data and "id" in data))
+    elif valid_key(alpaca_key) or valid_key(secret):
+        missing.append(result("Alpaca", "configuration", "One of the two Alpaca credentials is missing.",
+                              "Add both the API key and secret in API setup."))
     else:
-        missing.append(result("Alpaca", "missing", "Both Alpaca keys are required for account access and trading.",
-                              "Add an Alpaca key and secret in API setup. Start with paper trading."))
+        missing.append(result("Alpaca", "optional", "Account access and Alpaca market data are not set up.",
+                              "Add both Alpaca keys when you want to use these features."))
     definitions = [
         ("finnhub", "Finnhub", "https://finnhub.io/api/v1/quote", lambda key: {"X-Finnhub-Token": key},
          lambda key: {"symbol": "SPY"}, lambda data: "c" in data),
@@ -169,8 +173,8 @@ def check_connections(stored=None, provider="openai", backend_url=""):
         if valid_key(key):
             jobs.append((name, endpoint, headers(key.strip()), params(key.strip()), expected))
         elif key_id in {"finnhub", "fred"}:
-            missing.append(result(name, "missing", "This data source has no key configured.",
-                                  "Add a key in API setup to enable its news or economic data."))
+            missing.append(result(name, "optional", "This optional data source is not enabled.",
+                                  "Add a key if you want to use it."))
     def run(job):
         name, endpoint, headers, params, expected = job
         return probe(name, endpoint, headers=headers, params=params, expected=expected)

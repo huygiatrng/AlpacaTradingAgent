@@ -45,7 +45,7 @@ class SafetyPanelWiringTests(unittest.TestCase):
         )
 
     def test_status_cards_render_green_and_red(self):
-        from webui.callbacks.safety_callbacks import _status_cards
+        from webui.callbacks.safety_callbacks import _status_cards, _safety_alerts, _safety_summary
 
         with tempfile.TemporaryDirectory() as tmp:
             guard = _guard(tmp)
@@ -59,13 +59,12 @@ class SafetyPanelWiringTests(unittest.TestCase):
             self.assertIn("fa-check-circle", healthy)
 
             guard.engage_kill_switch("test halt")
-            tripped = str(
-                _status_cards(
-                    guard.status(account={"equity": 100_000.0, "last_equity": 100_000.0})
-                )
-            )
+            status = guard.status(account={"equity": 100_000.0, "last_equity": 100_000.0})
+            tripped = str(_status_cards(status))
             self.assertIn("fa-exclamation-triangle", tripped)
-            self.assertIn("test halt", tripped)
+            # Blocking reasons stay outside the collapsed detail cards.
+            self.assertIn("test halt", str(_safety_alerts(status)))
+            self.assertIn("Orders halted", str(_safety_summary(status)))
 
     def test_analysis_start_is_gated_by_llm_budget(self):
         with tempfile.TemporaryDirectory() as tmp:

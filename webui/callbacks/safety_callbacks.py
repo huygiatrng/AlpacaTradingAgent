@@ -4,7 +4,7 @@ Renders live guardrail status and drives the kill switch.
 """
 
 import dash_bootstrap_components as dbc
-from dash import Input, Output, ctx, html
+from dash import Input, Output, State, ctx, html
 
 from webui.config.constants import COLORS
 
@@ -84,7 +84,25 @@ def _status_cards(status):
                 className="mb-2",
             )
         )
-    rows = [dbc.Row(cards, className="g-2")]
+    return html.Div(dbc.Row(cards, className="g-2"))
+
+
+def _safety_summary(status):
+    if not status.get("enabled", True):
+        return dbc.Badge("Guards disabled", color="warning")
+    if status.get("kill_switch_active"):
+        return dbc.Badge("Orders halted", color="danger")
+    if status.get("reasons"):
+        return dbc.Badge("Trading blocked", color="danger")
+    guards = list(status.get("guards", {}).values())
+    pending = sum(guard.get("status") == "skipped" for guard in guards)
+    if pending:
+        return html.Span(f"Guards on · {pending} awaiting account data", className="text-muted")
+    return html.Span("Guards on", className="text-success")
+
+
+def _safety_alerts(status):
+    rows = []
     if status.get("reasons"):
         rows.append(
             dbc.Alert(
@@ -121,6 +139,8 @@ def register_safety_callbacks(app):
         [
             Output("safety-status-container", "children"),
             Output("safety-action-status", "children"),
+            Output("safety-summary", "children"),
+            Output("safety-alerts", "children"),
         ],
         [
             Input("safety-refresh-interval", "n_intervals"),
@@ -152,4 +172,9 @@ def register_safety_callbacks(app):
             )
 
         status = guard.status(account=_account_snapshot())
-        return _status_cards(status), action_message
+        return _status_cards(status), action_message, _safety_summary(status), _safety_alerts(status)
+
+    @app.callback(Output("safety-details", "is_open"), Input("safety-details-toggle", "n_clicks"),
+                  State("safety-details", "is_open"), prevent_initial_call=True)
+    def toggle_details(clicks, is_open):
+        return not is_open if clicks else is_open

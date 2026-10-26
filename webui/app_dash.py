@@ -86,6 +86,7 @@ def create_app():
         __name__,
         server=server,
         assets_folder=str(Path(__file__).parent / "assets"),
+        assets_ignore=r"(?:bootstrap|fontawesome)\.min\.css",
         external_stylesheets=[
             "/assets/vendor/bootstrap.min.css",
             *APP_CONFIG["external_stylesheets"]

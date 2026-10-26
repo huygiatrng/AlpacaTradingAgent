@@ -18,7 +18,7 @@ API_CONFIGS = [
         "env_var": "OPENAI_API_KEY",
         "placeholder": "sk-...",
         "help_url": "https://platform.openai.com/api-keys",
-        "help_text": "Required for LLM functionality",
+        "help_text": "Use for OpenAI models and OpenAI-specific research tools",
         "icon": "fas fa-brain"
     },
     {

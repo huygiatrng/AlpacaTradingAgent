@@ -6,26 +6,44 @@ import dash_bootstrap_components as dbc
 
 def create_connection_panel():
     return dbc.Card(dbc.CardBody([
-        dbc.Row([
-            dbc.Col([
-                html.H4("Start here", className="mb-2"),
-                html.P("1. Add your API keys.  2. Check connections.  3. Choose a symbol and run an analysis.", className="mb-1"),
-                html.Small("Use paper trading while setting up. Automatic order placement is off by default.", className="text-muted"),
-            ], md=8),
-            dbc.Col([
-                dbc.Button("API setup", id="setup-api-btn", color="primary", className="me-2 mb-2"),
-                dbc.Button("Check connections", id="check-connections-btn", color="outline-info", className="mb-2"),
-            ], md=4, className="text-md-end"),
-        ]),
+        html.Div([
+            html.H6("Start here", className="compact-panel-title"),
+            html.Span("Checking connections…", id="connection-summary", className="compact-panel-summary", role="status"),
+            html.Div([
+                dbc.Button("API setup", id="setup-api-btn", color="primary", size="sm"),
+                dbc.Button("Check", id="check-connections-btn", color="outline-info", size="sm", title="Check API connections"),
+                dbc.Button("Details", id="connection-details-toggle", color="outline-secondary", size="sm"),
+            ], className="compact-panel-actions"),
+        ], className="compact-panel-toolbar"),
         dcc.Store(id="connection-results"),
-        dcc.Loading(html.Div(id="connection-status", className="mt-3"), type="circle"),
-        html.Details([
-            html.Summary("Test the selected AI models"),
-            html.P("Connection checks do not generate AI text. This optional test sends one short request to each selected model and may incur a small API charge.", className="small mt-2"),
-            dbc.Button("Test selected models", id="test-models-btn", color="outline-secondary", size="sm"),
-            dcc.Loading(html.Div(id="model-test-status", className="mt-2"), type="circle"),
-        ], className="mt-3"),
-    ]), className="mb-4 connection-panel")
+        dbc.Collapse([
+            html.P("Choose an AI provider under LLM Models, add its key, then run an analysis. Other data sources are optional unless your workflow uses them.", className="small text-muted mb-2"),
+            dcc.Loading(html.Div(id="connection-status"), type="circle"),
+            html.Details([
+                html.Summary("Test the selected AI models"),
+                html.P("Connection checks do not generate AI text. This optional test sends one short request to each selected model and may incur a small API charge.", className="small mt-2"),
+                dbc.Button("Test selected models", id="test-models-btn", color="outline-secondary", size="sm"),
+                dcc.Loading(html.Div(id="model-test-status", className="mt-2"), type="circle"),
+            ], className="mt-2"),
+        ], id="connection-details", is_open=False, className="compact-panel-details"),
+    ]), className="mb-2 connection-panel compact-panel")
+
+
+def render_connection_summary(report):
+    results = (report or {}).get("results", [])
+    if not results:
+        return "Choose a provider under LLM Models to get started."
+    issues = [item for item in results if item["status"] not in {"connected", "optional"}]
+    if issues:
+        first = issues[0]
+        extra = f" · +{len(issues) - 1} more" if len(issues) > 1 else ""
+        return html.Span(f"{first['service']}: {first['label']}{extra}", className="text-warning")
+    connected = sum(item["status"] == "connected" for item in results)
+    ai = next((item for item in results if item["service"].startswith("AI · ")), None)
+    summary = f"{ai['service']}: Connected" if ai else f"{connected} connected"
+    if ai and connected > 1:
+        summary += f" · {connected - 1} data services"
+    return html.Span(summary, className="text-success")
 
 
 def render_results(report):
@@ -34,14 +52,14 @@ def render_results(report):
         return html.P("Open API setup to add your keys, then check connections.")
     rows = []
     for item in results:
-        color = "success" if item["status"] == "connected" else ("secondary" if item["status"] == "missing" else "warning")
+        color = "success" if item["status"] == "connected" else ("secondary" if item["status"] == "optional" else "warning")
         rows.append(html.Tr([
             html.Th(item["service"], scope="row"),
             html.Td(dbc.Badge(item["label"], color=color)),
             html.Td([item["message"], html.Div(item.get("action", ""), className="small text-muted")]),
         ]))
-    problems = sum(item["status"] != "connected" for item in results)
-    summary = "All checked services connected." if not problems else f"{problems} connection(s) need attention. See the action beside each service."
+    problems = sum(item["status"] not in {"connected", "optional"} for item in results)
+    summary = "All configured services connected." if not problems else f"{problems} connection(s) need attention."
     return html.Div([
         html.P(summary, className="mb-2"),
         dbc.Table([html.Thead(html.Tr([html.Th("Service"), html.Th("Status"), html.Th("What to do")])), html.Tbody(rows)],

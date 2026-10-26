@@ -94,6 +94,42 @@ def test_only_configured_providers_are_checked_and_alpaca_mode_is_respected(monk
     assert "openai" not in [item["service"] for item in report["results"]]
 
 
+@pytest.mark.parametrize("provider,key_id", [("google", "google"), ("anthropic", "anthropic"),
+                                            ("deepseek", "deepseek"), ("qwen", "dashscope"),
+                                            ("glm", "zhipu"), ("local_openai", "openai"), ("ollama", None)])
+def test_ai_diagnostics_follow_only_the_selected_provider(monkeypatch, provider, key_id):
+    keys = {"openai": "unused-openai-key", "anthropic": "unused-claude-key"}
+    if key_id:
+        keys[key_id] = "selected-key"
+    monkeypatch.setattr(health, "resolved_keys", lambda _: keys)
+    calls = []
+    def probe(service, endpoint, **kwargs):
+        calls.append((service, endpoint))
+        return health.result(service, "connected", "OK")
+    monkeypatch.setattr(health, "probe", probe)
+    report = health.check_connections(provider=provider)
+    assert len(calls) == 1
+    assert calls[0][1].startswith(health.LLM_ENDPOINTS[provider])
+    assert calls[0][0].startswith("AI · ")
+    assert all(item["status"] in {"connected", "optional"} for item in report["results"])
+
+
+def test_unselected_openai_key_does_not_override_missing_gemini_key(monkeypatch):
+    monkeypatch.setattr(health, "resolved_keys", lambda _: {"openai": "unused-key"})
+    report = health.check_connections(provider="google")
+    missing = [item for item in report["results"] if item["status"] == "missing"]
+    assert len(missing) == 1
+    assert "Gemini" in missing[0]["service"]
+    assert not any("OpenAI" in item["service"] for item in report["results"])
+
+
+def test_partial_alpaca_setup_is_reported_as_incomplete(monkeypatch):
+    monkeypatch.setattr(health, "resolved_keys", lambda _: {"alpaca-key": "key-only"})
+    report = health.check_connections(provider="google")
+    alpaca = next(item for item in report["results"] if item["service"] == "Alpaca")
+    assert alpaca["status"] == "configuration"
+
+
 def test_model_test_deduplicates_and_bounds_output(monkeypatch):
     from tradingagents import llm_clients
     monkeypatch.setattr(health, "resolved_keys", lambda _: {"openai": "SECRET"})
@@ -174,6 +210,8 @@ def test_diagnostic_callback_inputs_exist_in_layout(monkeypatch):
         if any(name in output for name in ("connection-results", "model-test-status")):
             for item in callback["inputs"] + callback["state"]:
                 assert item["id"] in ids
+        if output == "connection-results.data":
+            assert {"llm-provider", "backend-url"}.issubset({item["id"] for item in callback["inputs"]})
     client = app.server.test_client()
     assert client.get("/_dash-layout").status_code == 200
     assert client.get("/assets/app.ico").status_code == 200
