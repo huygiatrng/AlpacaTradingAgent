@@ -1,0 +1,35 @@
+name: Windows desktop
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-desktop.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements-desktop.txt
+      - name: Build executable
+        run: python scripts/build_windows.py
+      - name: Verify packaged runtime offline
+        shell: pwsh
+        run: |
+          $env:TRADINGAGENTS_DESKTOP_HOME = Join-Path $env:RUNNER_TEMP 'AlpacaDesktopSmoke'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'desktop-smoke.json'
+          $process = Start-Process -FilePath '.\dist\AlpacaTradingAgent.exe' -ArgumentList '--self-test', $reportPath -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Packaged runtime verification failed' }
+          Get-Content -LiteralPath $reportPath
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AlpacaTradingAgent-Windows
+          path: dist/AlpacaTradingAgent.exe

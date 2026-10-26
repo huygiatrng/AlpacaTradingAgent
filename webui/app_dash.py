@@ -15,6 +15,7 @@ import dash
 import dash_bootstrap_components as dbc
 from flask import Flask
 import logging
+from pathlib import Path
 
 from webui.config.constants import APP_CONFIG, COLORS
 from webui.layout import create_main_layout
@@ -25,17 +26,17 @@ def apply_sequential_mode_fix():
     """Apply fix for sequential execution mode report mapping bug"""
     try:
         from webui.utils.state import AppState
-        
+
         # Check if fix is already applied
         if hasattr(AppState, '_mapping_fix_applied'):
             return True
-            
+
         # Patch the process_chunk_updates method to fix report mapping
         original_process_chunk_updates = AppState.process_chunk_updates
-        
+
         def fixed_process_chunk_updates(self, chunk):
             """Fixed version that correctly maps social analyst reports"""
-            
+
             # 🔍 DEBUG: Log what we're receiving
             current_symbol = getattr(self, 'current_symbol', '')
             if current_symbol:
@@ -45,7 +46,7 @@ def apply_sequential_mode_fix():
                     if social_status == "in_progress":
                         chunk_fields = list(chunk.keys())
                         # print(f"[DEBUG] Social Analyst chunk received: {chunk_fields}")
-                        
+
                         # Check for the ACTUAL bug: Social Analyst writing to market_report
                         if "market_report" in chunk and "sentiment_report" not in chunk:
                             # print(f"[FIX] 🛑 Detected Social Analyst incorrectly updating market_report - fixing...")
@@ -57,15 +58,15 @@ def apply_sequential_mode_fix():
                             # This is correct - Social Analyst updating sentiment_report
                             sentiment_length = len(chunk["sentiment_report"])
                             # print(f"[DEBUG] ✅ Social Analyst correctly updating sentiment_report ({sentiment_length} chars)")
-            
+
             # Call the original method with the fixed chunk
             return original_process_chunk_updates(self, chunk)
-        
+
         # Apply the patch
         AppState.process_chunk_updates = fixed_process_chunk_updates
         AppState._mapping_fix_applied = True
         return True
-        
+
     except Exception as e:
         print(f"⚠️ Could not apply sequential mode fix: {e}")
         return False
@@ -73,10 +74,10 @@ def apply_sequential_mode_fix():
 
 def create_app():
     """Create and configure the Dash application"""
-    
+
     # Apply the sequential mode fix first
     apply_sequential_mode_fix()
-    
+
     # Initialize Flask server
     server = Flask(__name__)
 
@@ -84,8 +85,9 @@ def create_app():
     app = dash.Dash(
         __name__,
         server=server,
+        assets_folder=str(Path(__file__).parent / "assets"),
         external_stylesheets=[
-            dbc.themes.DARKLY,
+            "/assets/vendor/bootstrap.min.css",
             *APP_CONFIG["external_stylesheets"]
         ],
         suppress_callback_exceptions=APP_CONFIG["suppress_callback_exceptions"],
@@ -106,20 +108,20 @@ def create_app():
 
 def run_app(port=7860, share=False, server_name="127.0.0.1", debug=False, max_threads=1):
     """Run the TradingAgents Dash Web UI"""
-    
+
     # Create the app
     app = create_app()
-    
+
     if debug:
         print(f"Starting TradingAgents Dash Web UI on port {port}...")
     else:
         print("Starting TradingAgents Web UI...")
-    
+
     # Suppress verbose HTTP request logs from Werkzeug
     logging.getLogger("werkzeug").setLevel(logging.WARNING)
     # Optionally also silence Dash's callback exceptions logger
     logging.getLogger("dash.callback").setLevel(logging.ERROR)
-    
+
     # Run the app
     app.run(
         port=port,
@@ -128,7 +130,7 @@ def run_app(port=7860, share=False, server_name="127.0.0.1", debug=False, max_th
         dev_tools_hot_reload=debug,
         use_reloader=False  # Disable reloader to prevent double-start in debug mode
     )
-    
+
     return 0
 
 
@@ -148,4 +150,4 @@ def __getattr__(name):
 
 
 if __name__ == "__main__":
-    run_app(debug=True) 
+    run_app(debug=True)

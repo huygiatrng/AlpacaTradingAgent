@@ -46,6 +46,7 @@ DEFAULT_API_KEYS = {
     "openrouter": "",
     "azure-openai": "",
     "alpha-vantage": "",
+    "fxmacrodata": "",
     "alpaca-key": "",
     "alpaca-secret": "",
     "finnhub": "",

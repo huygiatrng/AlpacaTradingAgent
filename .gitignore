@@ -8,3 +8,6 @@ eval_data/
 *.egg-info/
 .env
 data/
+build/
+dist/
+.playwright-cli/

@@ -1,0 +1,13 @@
+# Windows desktop app
+
+Double-click `AlpacaTradingAgent.exe`. The launcher opens your workspace in your usual browser. Keep the launcher window open while using the app; close it to stop the local server. Python, a terminal, and administrator access are not needed. The first start can take longer while the single-file app unpacks its runtime. If your browser does not open, press **Open workspace** in the launcher. Opening the executable again reuses the running workspace.
+
+Start with **API setup** and enter the keys for the services you use. Save them, then read the connection status beside each service. A rejected key needs replacing; access errors can mean a subscription or permission issue; rate and credit limits need a billing check or time to recover. Choose another AI provider in the analysis settings when necessary. Unused providers do not need keys. **Test selected models** makes a short real generation request to each chosen model and can incur a small API charge. Connection checks use read-only requests and never place orders.
+
+The app stores keys in this browser profile's local storage and sends them to the local app and the relevant API provider when making requests. They are not embedded in the executable. You can also put a private `.env` beside the executable or in `%LOCALAPPDATA%\AlpacaTradingAgent`. Existing process environment variables take precedence, followed by the file beside the executable, then the file in the app folder. Never distribute a `.env` containing keys with the executable.
+
+Results, caches, memory, launcher state, and logs live in `%LOCALAPPDATA%\AlpacaTradingAgent`; **Open app folder** opens this location. The app remembers its local port so browser settings survive restarts. If another program uses that port, a different port is chosen and the browser may need its keys entered again. Startup errors appear in the launcher; the app folder contains `logs\desktop.log`. The executable is unsigned, so Windows may display the publisher as unknown.
+
+## Build from source
+
+On Windows with Python 3.12, install `requirements-desktop.txt` into a virtual environment and run `python scripts/build_windows.py`. The result is `dist/AlpacaTradingAgent.exe`. The build explicitly includes only application assets, prompt templates, and dependency resources. Local API keys, browser storage, `.env`, trading results, and personal memory are excluded. To recreate the icon after editing its source, run `python scripts/create_app_icon.py` before building.

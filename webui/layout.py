@@ -17,6 +17,7 @@ from webui.components.alpaca_account import render_alpaca_account_section
 from webui.components.safety_panel import create_safety_panel
 from webui.components.cost_panel import create_cost_panel
 from webui.components.api_config_modal import create_api_config_modal
+from webui.components.connection_panel import create_connection_panel
 from webui.config.constants import COLORS, REFRESH_INTERVALS
 
 
@@ -167,6 +168,7 @@ def create_main_layout():
             
             # Main content
             header,
+            create_connection_panel(),
             create_safety_panel(),
             alpaca_account_card,
             dbc.Row([

@@ -148,6 +148,15 @@ API_CONFIGS = [
         "icon": "fab fa-bitcoin"
     },
     {
+        "id": "fxmacrodata",
+        "name": "FXMacroData API Key",
+        "env_var": "FXMACRODATA_API_KEY",
+        "placeholder": "Optional FXMacroData key",
+        "help_url": "https://fxmacrodata.com",
+        "help_text": "Optional international economic calendar and releases",
+        "icon": "fas fa-globe"
+    },
+    {
         "id": "alpha-vantage",
         "name": "Alpha Vantage API Key",
         "env_var": "ALPHA_VANTAGE_API_KEY",
@@ -199,12 +208,12 @@ def create_api_input_row(api_config):
                     title="Show/Hide API Key"
                 ),
                 dbc.Button(
-                    html.I(className="fas fa-check"),
+                    "Not tested",
                     id=f"api-status-{api_id}",
-                    color="outline-success",
+                    color="outline-secondary",
                     disabled=True,
                     className="api-status-indicator",
-                    title="API Key Status"
+                    title="A saved key is not a connection test. Use Check connections."
                 ),
             ]),
         ], width=12),
@@ -257,7 +266,7 @@ def create_api_config_modal():
                     html.Div([
                         html.I(className="fas fa-info-circle me-2"),
                         "Configure your API keys below. Keys are stored in your browser's local storage and take precedence over .env file settings. ",
-                        html.Strong("Your keys never leave your browser."),
+                        html.Strong("Keys are sent to this local app and the selected API services to make requests. Keep this computer and browser profile private."),
                     ], className="alert alert-info mb-4"),
                     
                     # .env file status
@@ -343,7 +352,7 @@ def create_config_button():
     return dbc.Button(
         [
             html.I(className="fas fa-key me-2"),
-            "Config APIs"
+            "API setup"
         ],
         id="open-api-config-btn",
         color="outline-warning",
