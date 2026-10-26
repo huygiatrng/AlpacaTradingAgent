@@ -28,7 +28,6 @@ def register_api_config_callbacks(app):
     @app.callback(
         Output("api-config-modal", "is_open"),
         [
-            Input("open-api-config-btn", "n_clicks"),
             Input("setup-api-btn", "n_clicks"),
             Input("close-api-config-btn", "n_clicks"),
             Input("save-api-keys-btn", "n_clicks")
@@ -36,14 +35,14 @@ def register_api_config_callbacks(app):
         State("api-config-modal", "is_open"),
         prevent_initial_call=True
     )
-    def toggle_api_config_modal(open_clicks, setup_clicks, close_clicks, save_clicks, is_open):
+    def toggle_api_config_modal(setup_clicks, close_clicks, save_clicks, is_open):
         """Toggle the API config modal open/close state"""
         if not ctx.triggered:
             raise PreventUpdate
         
         trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
         
-        if trigger_id in {"open-api-config-btn", "setup-api-btn"}:
+        if trigger_id == "setup-api-btn":
             return True
         elif trigger_id in ["close-api-config-btn", "save-api-keys-btn"]:
             return False

@@ -9,7 +9,6 @@ import threading
 import time
 
 from webui.utils.state import app_state
-from webui.components.analysis import start_analysis
 from tradingagents.dataflows.alpaca_utils import AlpacaUtils
 from tradingagents.openai_model_registry import (
     get_default_model_for_provider,
@@ -887,6 +886,8 @@ def register_control_callbacks(app):
             app_state.init_symbol_state(symbol)
 
         def analysis_thread():
+            from webui.components.analysis import start_analysis
+
             if market_hour_enabled:
                 # Start market hour mode with scheduling logic
                 market_hour_config = {

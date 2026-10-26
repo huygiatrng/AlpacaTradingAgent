@@ -26,10 +26,12 @@ jobs:
         run: |
           $env:TRADINGAGENTS_DESKTOP_HOME = Join-Path $env:RUNNER_TEMP 'AlpacaDesktopSmoke'
           $reportPath = Join-Path $env:RUNNER_TEMP 'desktop-smoke.json'
-          $process = Start-Process -FilePath '.\dist\AlpacaTradingAgent.exe' -ArgumentList '--self-test', $reportPath -Wait -PassThru
+          $process = Start-Process -FilePath '.\dist\AlpacaTradingAgent.exe' -ArgumentList '--self-test', $reportPath -WindowStyle Hidden -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw 'Packaged runtime verification failed' }
           Get-Content -LiteralPath $reportPath
       - uses: actions/upload-artifact@v4
         with:
           name: AlpacaTradingAgent-Windows
-          path: dist/AlpacaTradingAgent.exe
+          path: |
+            dist/AlpacaTradingAgent.exe
+            dist/_internal/

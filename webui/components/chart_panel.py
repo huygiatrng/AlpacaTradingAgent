@@ -23,32 +23,35 @@ def create_chart_panel():
     return dbc.Card(
         dbc.CardBody([
             html.H4("Price chart", className="mb-3"),
-            html.Hr(),
-            dbc.Row([
-                dbc.Col([
-                    create_symbol_pagination("chart-pagination")
-                ], xs=12, sm=8),
-                dbc.Col([
-                    dbc.Button("🔄 Refresh Chart", id="manual-chart-refresh", color="outline-secondary", size="sm", className="float-end"),
-                ], xs=12, sm=4)
-            ], className="g-2 mb-2"),
+            html.P("Your chart will appear after you start an analysis.",
+                   id="chart-empty-state", className="text-muted small mb-0"),
             html.Div(id="current-symbol-display", className="text-center my-2"),
-            html.Div(id="chart-last-updated", className="text-muted text-center small mb-2"),
-            dbc.ButtonGroup([
-                dbc.Button("1D", id="period-1d", color="secondary", outline=True, className="me-1"),
-                dbc.Button("1W", id="period-1w", color="secondary", outline=True, className="me-1"),
-                dbc.Button("1M", id="period-1mo", color="secondary", outline=True, className="me-1"),
-                dbc.Button("1Y", id="period-1y", color="secondary", outline=True),
-            ], className="mb-3"),
-            html.Div(
-                dcc.Graph(
-                    id="chart-container",
-                    figure=create_welcome_chart(),
-                    config={'displayModeBar': True, 'responsive': True},
-                    style={"height": "400px", "width": "100%"}
+            html.Div([
+                dbc.Row([
+                    dbc.Col([
+                        create_symbol_pagination("chart-pagination")
+                    ], xs=12, sm=8),
+                    dbc.Col([
+                        dbc.Button("🔄 Refresh Chart", id="manual-chart-refresh", color="outline-secondary", size="sm", className="float-end"),
+                    ], xs=12, sm=4)
+                ], className="g-2 mb-2"),
+                html.Div(id="chart-last-updated", className="text-muted text-center small mb-2"),
+                dbc.ButtonGroup([
+                    dbc.Button("1D", id="period-1d", color="secondary", outline=True, className="me-1"),
+                    dbc.Button("1W", id="period-1w", color="secondary", outline=True, className="me-1"),
+                    dbc.Button("1M", id="period-1mo", color="secondary", outline=True, className="me-1"),
+                    dbc.Button("1Y", id="period-1y", color="secondary", outline=True),
+                ], className="mb-3"),
+                html.Div(
+                    dcc.Graph(
+                        id="chart-container",
+                        figure=create_welcome_chart(),
+                        config={'displayModeBar': True, 'responsive': True},
+                        style={"height": "400px", "width": "100%"}
+                    ),
+                    style={"height": "400px", "width": "100%", "overflow": "hidden"}
                 ),
-                style={"height": "400px", "width": "100%", "overflow": "hidden"}
-            ),
+            ], id="chart-content", style={"display": "none"}),
             # Hidden original pagination component for control callback compatibility
             html.Div([
                 dbc.Pagination(

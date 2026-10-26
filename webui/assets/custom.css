@@ -162,10 +162,6 @@ body {
         font-size: 0.75rem;
     }
 
-    .app-header .config-apis-btn {
-        display: none;
-    }
-
     .workspace-tabs {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1643,18 +1639,6 @@ body {
    API Configuration Modal Styling
    ============================================ */
 
-.config-apis-btn {
-    transition: all 0.3s ease;
-    font-weight: 600;
-    border-radius: 8px;
-    padding: 0.5rem 1rem;
-}
-
-.config-apis-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
-}
-
 .api-config-modal .modal-content {
     background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
     border: 1px solid #374151;
@@ -1828,10 +1812,6 @@ body {
         padding: 1rem;
     }
     
-    .config-apis-btn {
-        padding: 0.375rem 0.75rem;
-        font-size: 0.875rem;
-    }
 }
 
 /* ============================================

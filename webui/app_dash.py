@@ -135,9 +135,7 @@ def run_app(port=7860, share=False, server_name="127.0.0.1", debug=False, max_th
     return 0
 
 
-# The app instance is created lazily: building it eagerly at import time
-# fetches Alpaca account data, so any import of this module (directly or via
-# the webui package) would trigger network calls.
+# Build the component tree and register callbacks only when an app is requested.
 _app = None
 
 

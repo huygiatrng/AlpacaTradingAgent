@@ -291,10 +291,10 @@ def render_orders_table_error(error):
     ], className="orders-empty-state error-state")
 
 
-def render_orders_table(page=1, page_size=ORDERS_PAGE_SIZE):
+def render_orders_table(page=1, page_size=ORDERS_PAGE_SIZE, *, load_data=True):
     """Render the enhanced Recent Orders surface with table-only loading."""
     try:
-        page_data = AlpacaUtils.get_recent_orders_page(page=page, page_size=page_size)
+        page_data = AlpacaUtils.get_recent_orders_page(page=page, page_size=page_size) if load_data else {}
         active_page = page_data.get("page", page)
         total_pages = page_data.get("total_pages", 1)
         total_orders = page_data.get("total_orders", 0)
@@ -304,7 +304,8 @@ def render_orders_table(page=1, page_size=ORDERS_PAGE_SIZE):
             dcc.Loading(
                 html.Div(
                     id="orders-table-body-container",
-                    children=render_orders_table_body(page_data.get("orders", []), active_page),
+                    children=(render_orders_table_body(page_data.get("orders", []), active_page)
+                              if load_data else html.P("Loading recent orders…", className="text-muted small mb-0")),
                     className="orders-table-body",
                 ),
                 type="circle",
@@ -422,14 +423,17 @@ def render_alpaca_account_section():
             title="Refresh Alpaca account data"
             )
         ], className="mb-3 d-flex align-items-center"),
-        render_account_summary(),
+        html.Div(
+            html.P("Loading account details…", className="text-muted small"),
+            id="account-summary-container",
+        ),
         dbc.Row([
             dbc.Col([
                 html.H5([
                     html.I(className="fas fa-briefcase me-2"),
                     "Open Positions"
                 ], className="mb-3"),
-                html.Div(id="positions-table-container", children=render_positions_table())
+                html.Div(id="positions-table-container", children=html.P("Loading positions…", className="text-muted small"))
             ], xs=12, xl=7),
             dbc.Col([
                 html.H5([
@@ -437,7 +441,7 @@ def render_alpaca_account_section():
                     "Recent Orders"
                 ], className="mb-3"),
                 dcc.Store(id="orders-page-store", data=1),
-                html.Div(id="orders-table-container", children=render_orders_table())
+                html.Div(id="orders-table-container", children=render_orders_table(load_data=False))
             ], xs=12, xl=5)
         ], className="g-4 portfolio-tables"),
         # Hidden div for liquidation confirmations

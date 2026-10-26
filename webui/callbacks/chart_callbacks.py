@@ -26,6 +26,17 @@ def create_symbol_button(symbol, index, is_active=False):
 
 def register_chart_callbacks(app):
     """Register all chart-related callbacks including symbol pagination"""
+
+    @app.callback(
+        Output("chart-content", "style"),
+        Output("chart-empty-state", "style"),
+        Input("chart-container", "figure"),
+    )
+    def toggle_chart_content(figure):
+        """Reserve plotting space only when a figure contains data."""
+        has_data = any(trace.get("x") is not None and len(trace["x"]) > 0
+                       for trace in (figure or {}).get("data", []))
+        return ({}, {"display": "none"}) if has_data else ({"display": "none"}, {})
     
     @app.callback(
         Output("chart-pagination-container", "children"),
@@ -220,4 +231,4 @@ def register_chart_callbacks(app):
             button_id == "period-1w", 
             button_id == "period-1mo",
             button_id == "period-1y"
-        ) 
+        )

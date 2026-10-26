@@ -1,6 +1,7 @@
 """Build a self-contained Windows executable without credentials or user data."""
 
 from pathlib import Path
+import os
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules, copy_metadata
 
 root = Path(SPECPATH).parent
@@ -26,6 +27,12 @@ a = Analysis([str(root / "desktop_launcher.py")], pathex=[str(root)], binaries=b
                        "IPython", "jupyter", "pytest", "matplotlib", "scipy", "sympy", "notebook"],
              noarchive=False)
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name="AlpacaTradingAgent",
-          debug=False, strip=False, upx=False, console=False,
-          icon=str(root / "webui" / "assets" / "app.ico"))
+options = dict(name="AlpacaTradingAgent", debug=False, strip=False, upx=False,
+               console=False, icon=str(root / "webui" / "assets" / "app.ico"))
+if os.environ.get("TRADINGAGENTS_BUILD_ONEFILE") == "1":
+    exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], **options)
+else:
+    # Installed libraries stay beside the launcher instead of being extracted
+    # into a temporary directory on every launch.
+    exe = EXE(pyz, a.scripts, [], exclude_binaries=True, **options)
+    bundle = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="AlpacaTradingAgent")

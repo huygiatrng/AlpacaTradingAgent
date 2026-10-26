@@ -4,9 +4,6 @@ webui/components/header.py - Header component for the web UI.
 
 from dash import html
 
-from webui.components.api_config_modal import create_config_button
-
-
 def create_header():
     """Create the header component for the web UI."""
     return html.Header(
@@ -21,7 +18,6 @@ def create_header():
                 ],
                 className="app-brand",
             ),
-            create_config_button(),
         ],
         className="app-header",
     )

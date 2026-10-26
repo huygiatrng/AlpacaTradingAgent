@@ -14,11 +14,23 @@ from webui.components.alpaca_account import (
     render_orders_table_body,
     render_orders_table_error,
     render_positions_table,
+    render_account_summary,
 )
 
 
 def register_trading_callbacks(app):
     """Register all trading and Alpaca-related callbacks"""
+
+    @app.callback(
+        Output("account-summary-container", "children"),
+        Input("slow-refresh-interval", "n_intervals"),
+        Input("refresh-btn", "n_clicks"),
+        Input("refresh-alpaca-btn", "n_clicks"),
+        Input("api-keys-store", "data"),
+    )
+    def update_account_summary(_interval, _refresh, _account_refresh, _stored_keys):
+        """Fetch account data after the initial layout is already available."""
+        return render_account_summary()
 
     @app.callback(
         Output("alpaca-account-title", "children"),
@@ -60,9 +72,10 @@ def register_trading_callbacks(app):
         [Input("slow-refresh-interval", "n_intervals"),
          Input("refresh-btn", "n_clicks"),
          Input("refresh-alpaca-btn", "n_clicks"),
-         Input("orders-page-store", "data")]
+         Input("orders-page-store", "data"),
+         Input("api-keys-store", "data")]
     )
-    def update_enhanced_alpaca_tables(n_intervals, n_clicks, alpaca_refresh, orders_page):
+    def update_enhanced_alpaca_tables(n_intervals, n_clicks, alpaca_refresh, orders_page, _stored_keys):
         """Update the enhanced positions and orders tables"""
 
         page = orders_page if orders_page is not None else 1

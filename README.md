@@ -16,7 +16,7 @@
 
 ## Enhanced Features
 
-Windows users can open the standalone `AlpacaTradingAgent.exe` without a terminal or Python installation. See [the desktop guide](DESKTOP.md) for API setup, connection checks, storage, and build instructions.
+Windows users can open `AlpacaTradingAgent.exe` without a terminal or Python installation. Keep its `_internal` folder alongside it for fast startup. See [the desktop guide](DESKTOP.md) for API setup, connection checks, storage, and build instructions.
 
 AlpacaTradingAgent introduces powerful new capabilities specifically designed for Alpaca users:
 

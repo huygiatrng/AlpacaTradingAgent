@@ -347,21 +347,6 @@ def create_api_config_modal():
     return modal
 
 
-def create_config_button():
-    """Create the Config APIs button for the header"""
-    return dbc.Button(
-        [
-            html.I(className="fas fa-key me-2"),
-            "API setup"
-        ],
-        id="open-api-config-btn",
-        color="outline-warning",
-        size="sm",
-        className="config-apis-btn",
-        title="Configure API Keys"
-    )
-
-
 def get_api_configs():
     """Return the API configuration list for use in callbacks"""
     return API_CONFIGS

@@ -18,7 +18,7 @@ def create_decision_panel():
                     className="dash-markdown"
                 ),
                 style={
-                    "height": "400px", 
+                    "maxHeight": "400px",
                     "overflowY": "auto",
                     "overflowX": "hidden",
                     "border": "1px solid #334155",
@@ -29,4 +29,4 @@ def create_decision_panel():
             )
         ]),
         className="mb-4"
-    ) 
+    )

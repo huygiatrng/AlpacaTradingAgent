@@ -135,16 +135,8 @@ def self_test(report_path):
     from tradingagents.llm_clients import create_llm_client
     from tradingagents.agents.utils.memory import FinancialSituationMemory
     from webui.app_dash import create_app
-    from webui import layout
-    from dash import html
-
-    # This smoke test is strictly offline even when local keys exist.
-    original = layout.render_alpaca_account_section
-    layout.render_alpaca_account_section = lambda: html.Div()
-    try:
-        app = create_app()
-    finally:
-        layout.render_alpaca_account_section = original
+    # Building the real layout is offline; account requests run in callbacks.
+    app = create_app()
     client = app.server.test_client()
     report = {"frozen": bool(getattr(sys, "frozen", False)),
               "layout": client.get("/_dash-layout").status_code,
