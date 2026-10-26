@@ -15,21 +15,11 @@ def create_safety_panel():
     return dbc.Card(
         dbc.CardBody(
             [
-                dbc.Row(
+                html.Div(
                     [
-                        dbc.Col(
-                            [
-                                html.H4("Safety Guardrails", className="mb-1"),
-                                html.Div(
-                                    "Deterministic pre-trade checks, circuit breakers, and a "
-                                    "kill switch — enforced before any order reaches the broker, "
-                                    "independent of agent decisions.",
-                                    className="text-muted small",
-                                ),
-                            ],
-                            md=8,
-                        ),
-                        dbc.Col(
+                        html.H6("Safety Guardrails", className="compact-panel-title"),
+                        html.Span("Checking…", id="safety-summary", className="compact-panel-summary", role="status"),
+                        html.Div(
                             [
                                 dbc.ButtonGroup(
                                     [
@@ -50,16 +40,18 @@ def create_safety_panel():
                                             size="sm",
                                         ),
                                     ],
-                                    className="float-end",
                                 ),
+                                dbc.Button("Details", id="safety-details-toggle", color="outline-secondary", size="sm"),
                             ],
-                            md=4,
+                            className="compact-panel-actions",
                         ),
                     ],
-                    className="mb-3 align-items-start",
+                    className="compact-panel-toolbar",
                 ),
-                html.Div(id="safety-action-status", className="mb-2"),
-                html.Div(id="safety-status-container"),
+                html.Div(id="safety-action-status"),
+                html.Div(id="safety-alerts"),
+                dbc.Collapse(html.Div(id="safety-status-container"), id="safety-details", is_open=False,
+                             className="compact-panel-details"),
                 dcc.Interval(
                     id="safety-refresh-interval",
                     interval=30_000,  # 30s
@@ -67,5 +59,5 @@ def create_safety_panel():
                 ),
             ]
         ),
-        className="mb-4",
+        className="mb-2 safety-panel compact-panel",
     )

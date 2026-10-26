@@ -242,6 +242,8 @@ def _model_panel(role, title, icon, default_model):
                     ),
                     dbc.Select(
                         id=prefix,
+                        persistence=True,
+                        persistence_type="local",
                         options=get_model_options_for_provider("openai", role),
                         value=default_model,
                         className="config-select mt-3",
@@ -251,6 +253,8 @@ def _model_panel(role, title, icon, default_model):
                             "Custom model ID",
                             dbc.Input(
                                 id=f"{prefix}-custom-model",
+                                persistence=True,
+                                persistence_type="local",
                                 type="text",
                                 placeholder="provider/model-name",
                                 value="",
@@ -481,6 +485,8 @@ def _model_setup():
                         "LLM provider",
                         dbc.Select(
                             id="llm-provider",
+                            persistence=True,
+                            persistence_type="local",
                             options=get_llm_provider_options(),
                             value="openai",
                             className="config-select",
@@ -492,6 +498,9 @@ def _model_setup():
                             "Endpoint override",
                             dbc.Input(
                                 id="backend-url",
+                                persistence=True,
+                                persistence_type="local",
+                                debounce=True,
                                 type="text",
                                 placeholder="Optional OpenAI-compatible endpoint",
                                 value="",

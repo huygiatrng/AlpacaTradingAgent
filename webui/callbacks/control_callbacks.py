@@ -126,7 +126,7 @@ def _status_panel(title, body="", items=None, tone="neutral", icon="fa-circle-in
     content = [
         html.Div(
             [
-                html.I(className=f"fa-solid {icon} config-info-icon"),
+                html.Span(html.I(className=f"fa-solid {icon}"), className="config-info-icon"),
                 html.Div(copy_children, className="config-info-copy"),
             ],
             className="config-info-heading",

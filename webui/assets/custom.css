@@ -1977,6 +1977,7 @@ body {
     border-radius: 8px;
     background: rgba(148, 163, 184, 0.12);
     color: #CBD5E1;
+    line-height: 1;
 }
 
 .config-info-title {
@@ -2657,5 +2658,58 @@ body {
 
     .orders-page-meta {
         white-space: normal;
+    }
+}
+
+/* Keep setup and safety controls visible without dominating the workspace. */
+.compact-panel > .card-body {
+    padding: 0.6rem 0.85rem;
+}
+
+.compact-panel-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.8rem;
+}
+
+.compact-panel-title {
+    margin: 0;
+    font-size: 0.95rem;
+    white-space: nowrap;
+}
+
+.compact-panel-summary {
+    font-size: 0.8rem;
+    min-width: 0;
+}
+
+.compact-panel-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.compact-panel-actions .btn-outline-secondary {
+    color: #CBD5E1;
+    border-color: #475569;
+}
+
+.compact-panel-details > :first-child {
+    margin-top: 0.7rem;
+}
+
+.compact-panel-details .table {
+    font-size: 0.8rem;
+}
+
+@media (max-width: 575px) {
+    .compact-panel-summary {
+        flex: 1;
+    }
+    .compact-panel-actions {
+        width: 100%;
+        margin-left: 0;
     }
 }
