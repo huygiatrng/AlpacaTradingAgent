@@ -1,0 +1,27 @@
+$kind: http-request
+id: 6429f2e3-a449-9039-ce56-dddc0ae480ca
+url: 'https://finnhub.io/api/v1/company-news?symbol={{symbol}}&from={{last_week}}&to={{today}}'
+method: GET
+order: 2000
+settings:
+  followRedirects: false
+queryParams:
+  - key: symbol
+    value: '{{symbol}}'
+  - key: from
+    value: '{{last_week}}'
+  - key: to
+    value: '{{today}}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('News items have the fields used by the news analyst', () => {
+        const articles = pm.response.json();
+        pm.expect(Array.isArray(articles)).to.equal(true);
+        articles.forEach(article => {
+          pm.expect(typeof article.headline === 'string' && article.headline.length > 0).to.equal(true);
+          pm.expect(typeof article.url === 'string' && /^https?:\/\//.test(article.url)).to.equal(true);
+          pm.expect(Number.isFinite(article.datetime) && article.datetime > 0).to.equal(true);
+        });
+      });

@@ -1,0 +1,34 @@
+$kind: http-request
+id: b651c176-6338-001c-f1c8-948adeb2ede6
+url: 'https://data.alpaca.markets/v2/stocks/{{symbol}}/bars?timeframe=1Day&start={{last_week}}&end={{today}}&limit=5&feed=iex&adjustment=all'
+method: GET
+order: 2000
+settings:
+  followRedirects: false
+queryParams:
+  - key: timeframe
+    value: '1Day'
+  - key: start
+    value: '{{last_week}}'
+  - key: end
+    value: '{{today}}'
+  - key: limit
+    value: '5'
+  - key: feed
+    value: 'iex'
+  - key: adjustment
+    value: 'all'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Daily bars contain usable OHLCV data', () => {
+        const data = pm.response.json();
+        pm.expect(data.symbol).to.equal(pm.variables.get('symbol'));
+        pm.expect(Array.isArray(data.bars) && data.bars.length > 0).to.equal(true);
+        data.bars.forEach(bar => {
+          pm.expect(['o', 'h', 'l', 'c'].every(field => Number.isFinite(bar[field]) && bar[field] > 0)).to.equal(true);
+          pm.expect(bar.h >= Math.max(bar.o, bar.c, bar.l) && bar.l <= Math.min(bar.o, bar.c)).to.equal(true);
+          pm.expect(Number.isFinite(bar.v) && bar.v >= 0 && Number.isFinite(Date.parse(bar.t))).to.equal(true);
+        });
+      });

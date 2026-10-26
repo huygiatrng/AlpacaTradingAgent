@@ -1,0 +1,31 @@
+$kind: http-request
+id: a7b284c8-d426-45f4-b70c-554a8214c7de
+url: 'https://api.stlouisfed.org/fred/series/observations?series_id={{fred_series}}&api_key={{FRED_API_KEY}}&file_type=json&sort_order=desc&limit=5'
+method: GET
+order: 1000
+settings:
+  followRedirects: false
+queryParams:
+  - key: series_id
+    value: '{{fred_series}}'
+  - key: api_key
+    value: '{{FRED_API_KEY}}'
+  - key: file_type
+    value: 'json'
+  - key: sort_order
+    value: 'desc'
+  - key: limit
+    value: '5'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Series has dated observations and at least one numeric value', () => {
+        const rows = pm.response.json().observations;
+        pm.expect(Array.isArray(rows) && rows.length > 0).to.equal(true);
+        rows.forEach(row => {
+          pm.expect(Number.isFinite(Date.parse(row.date))).to.equal(true);
+          pm.expect(row.value === '.' || (typeof row.value === 'string' && row.value.trim() !== '' && Number.isFinite(Number(row.value)))).to.equal(true);
+        });
+        pm.expect(rows.some(row => row.value !== '.' && Number.isFinite(Number(row.value)))).to.equal(true);
+      });

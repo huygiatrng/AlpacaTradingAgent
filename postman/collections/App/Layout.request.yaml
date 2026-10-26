@@ -1,0 +1,25 @@
+$kind: http-request
+id: 6d7999e1-ff2e-4d84-b5cc-caacd94689f5
+url: '{{app_url}}/_dash-layout'
+method: GET
+order: 2000
+settings:
+  followRedirects: false
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Layout includes API setup, provider selection and safety controls', () => {
+        const ids = new Set();
+        function visit(node) {
+          if (Array.isArray(node)) node.forEach(visit);
+          else if (node && typeof node === 'object') {
+            if (node.props && node.props.id) ids.add(node.props.id);
+            Object.values(node).forEach(visit);
+          }
+        }
+        visit(pm.response.json());
+        ['connection-summary', 'connection-details', 'llm-provider', 'safety-summary', 'safety-alerts'].forEach(id => {
+          pm.expect(ids.has(id), `Missing component: ${id}`).to.equal(true);
+        });
+      });

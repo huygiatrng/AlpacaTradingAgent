@@ -1,0 +1,15 @@
+$kind: collection
+id: 4e42a683-3bae-4597-9456-55a7f29a8961
+order: 5000
+scripts:
+  - type: http:beforeRequest
+    language: text/javascript
+    code: |-
+      const names = ["COINDESK_API_KEY"];
+      const configured = names.filter(name => pm.variables.get(name));
+      if (configured.length === 0) {
+        console.warn('SKIPPED CryptoCompare: credentials are not configured.');
+        pm.execution.skipRequest();
+      } else {
+        pm.request.headers.upsert({key: 'Authorization', value: 'Apikey ' + pm.variables.get('COINDESK_API_KEY')});
+      }

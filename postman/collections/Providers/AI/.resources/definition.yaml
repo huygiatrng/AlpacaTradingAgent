@@ -1,0 +1,4 @@
+$kind: collection
+id: b54b48fe-a290-4f01-96cc-a28fdb808a82
+order: 1000
+description: Only the chosen provider is checked. A successful catalog/key request does not prove a model can generate text; use the app's selected-model test for that.

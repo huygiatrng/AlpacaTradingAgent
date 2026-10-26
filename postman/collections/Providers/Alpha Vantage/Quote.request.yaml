@@ -1,0 +1,24 @@
+$kind: http-request
+id: da00a3fd-864a-58de-160f-f2f1f881edae
+url: 'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={{symbol}}&apikey={{ALPHA_VANTAGE_API_KEY}}'
+method: GET
+order: 1000
+settings:
+  followRedirects: false
+queryParams:
+  - key: function
+    value: 'GLOBAL_QUOTE'
+  - key: symbol
+    value: '{{symbol}}'
+  - key: apikey
+    value: '{{ALPHA_VANTAGE_API_KEY}}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Fallback quote matches the requested symbol and has a positive price', () => {
+        const quote = pm.response.json()['Global Quote'];
+        pm.expect(Boolean(quote)).to.equal(true);
+        pm.expect(quote['01. symbol']).to.equal(pm.variables.get('symbol'));
+        pm.expect(Number.isFinite(Number(quote['05. price'])) && Number(quote['05. price']) > 0).to.equal(true);
+      });

@@ -1,0 +1,15 @@
+$kind: collection
+id: 1e19997d-fc25-4fa5-af64-9e654c00ba0b
+order: 3000
+scripts:
+  - type: http:beforeRequest
+    language: text/javascript
+    code: |-
+      const names = ["FINNHUB_API_KEY"];
+      const configured = names.filter(name => pm.variables.get(name));
+      if (configured.length === 0) {
+        console.warn('SKIPPED Finnhub: credentials are not configured.');
+        pm.execution.skipRequest();
+      } else {
+        pm.request.headers.upsert({key: 'X-Finnhub-Token', value: '' + pm.variables.get('FINNHUB_API_KEY')});
+      }

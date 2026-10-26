@@ -1,0 +1,13 @@
+$kind: collection
+id: d6dd8fb2-532b-4774-b89b-0f3805e15e73
+order: 7000
+scripts:
+  - type: http:beforeRequest
+    language: text/javascript
+    code: |-
+      const names = ["ALPHA_VANTAGE_API_KEY"];
+      const configured = names.filter(name => pm.variables.get(name));
+      if (configured.length === 0) {
+        console.warn('SKIPPED Alpha Vantage: credentials are not configured.');
+        pm.execution.skipRequest();
+      }

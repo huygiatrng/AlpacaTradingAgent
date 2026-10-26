@@ -1,0 +1,57 @@
+$kind: http-request
+id: 3d69ea73-4ce3-ba85-be4d-61ad1da58504
+url: '{{ai_check_url}}'
+method: GET
+order: 1000
+settings:
+  followRedirects: false
+scripts:
+  - type: beforeRequest
+    language: text/javascript
+    code: |-
+      const providers = {
+        openai: ['https://api.openai.com/v1', 'OPENAI_API_KEY'],
+        google: ['https://generativelanguage.googleapis.com/v1beta', 'GOOGLE_API_KEY'],
+        anthropic: ['https://api.anthropic.com/v1', 'ANTHROPIC_API_KEY'],
+        xai: ['https://api.x.ai/v1', 'XAI_API_KEY'],
+        minimax: ['https://api.minimax.io/v1', 'MINIMAX_API_KEY'],
+        deepseek: ['https://api.deepseek.com', 'DEEPSEEK_API_KEY'],
+        qwen: ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'DASHSCOPE_API_KEY'],
+        glm: ['https://open.bigmodel.cn/api/paas/v4', 'ZHIPU_API_KEY'],
+        openrouter: ['https://openrouter.ai/api/v1', 'OPENROUTER_API_KEY'],
+        local_openai: ['http://localhost:1234/v1', 'LOCAL_LLM_API_KEY'],
+        ollama: ['http://localhost:11434/v1', 'LOCAL_LLM_API_KEY']
+      };
+      const provider = pm.variables.get('ai_provider');
+      const config = providers[provider];
+      if (!config) throw new Error('Choose a supported ai_provider. Azure needs the deployment-specific model test in the app.');
+      const key = pm.variables.get(config[1]);
+      const local = ['local_openai', 'ollama'].includes(provider);
+      if (!local && !key) {
+        console.warn(`SKIPPED AI: ${config[1]} is not configured.`);
+        pm.execution.skipRequest();
+      } else {
+        const base = (pm.variables.get('ai_base_url') || config[0]).replace(/\/+$/, '');
+        if (!/^https:\/\/[^/@?#]+(?:\/[^?#]*)?$/.test(base) && !/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(?:\/[^?#]*)?$/.test(base)) {
+          throw new Error('Use HTTPS, or HTTP on localhost; no URL credentials, query or fragment.');
+        }
+        pm.variables.set('ai_check_url', base + (provider === 'openrouter' ? '/key' : '/models'));
+        if (key) {
+          const header = provider === 'google' ? 'x-goog-api-key' : provider === 'anthropic' ? 'x-api-key' : 'Authorization';
+          pm.request.headers.upsert({key: header, value: header === 'Authorization' ? `Bearer ${key}` : key});
+        }
+        if (provider === 'anthropic') pm.request.headers.upsert({key: 'anthropic-version', value: '2023-06-01'});
+      }
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Selected provider returns its authenticated catalog or key details', () => {
+        const body = pm.response.json();
+        const provider = pm.variables.get('ai_provider');
+        if (provider === 'openrouter') pm.expect(Boolean(body.data && typeof body.data === 'object')).to.equal(true);
+        else {
+          const models = provider === 'google' ? body.models : body.data;
+          pm.expect(Array.isArray(models) && models.length > 0).to.equal(true);
+          pm.expect(models.every(model => typeof (provider === 'google' ? model.name : model.id) === 'string')).to.equal(true);
+        }
+      });

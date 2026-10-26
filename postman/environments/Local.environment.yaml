@@ -1,0 +1,83 @@
+name: AlpacaTradingAgent - Local
+id: 374b51bd-9cee-4469-9894-a267de23aa45
+values:
+  - key: app_url
+    value: 'http://127.0.0.1:7860'
+    enabled: true
+    type: default
+  - key: ai_provider
+    value: 'openai'
+    enabled: true
+    type: default
+  - key: ai_base_url
+    value: ''
+    enabled: true
+    type: default
+  - key: OPENAI_API_KEY
+    value: ''
+    enabled: true
+    type: secret
+  - key: GOOGLE_API_KEY
+    value: ''
+    enabled: true
+    type: secret
+  - key: ANTHROPIC_API_KEY
+    value: ''
+    enabled: true
+    type: secret
+  - key: XAI_API_KEY
+    value: ''
+    enabled: true
+    type: secret
+  - key: MINIMAX_API_KEY
+    value: ''
+    enabled: true
+    type: secret
+  - key: DEEPSEEK_API_KEY
+    value: ''
+    enabled: true
+    type: secret
+  - key: DASHSCOPE_API_KEY
+    value: ''
+    enabled: true
+    type: secret
+  - key: ZHIPU_API_KEY
+    value: ''
+    enabled: true
+    type: secret
+  - key: OPENROUTER_API_KEY
+    value: ''
+    enabled: true
+    type: secret
+  - key: LOCAL_LLM_API_KEY
+    value: ''
+    enabled: true
+    type: secret
+  - key: ALPACA_API_KEY
+    value: ''
+    enabled: true
+    type: secret
+  - key: ALPACA_SECRET_KEY
+    value: ''
+    enabled: true
+    type: secret
+  - key: FINNHUB_API_KEY
+    value: ''
+    enabled: true
+    type: secret
+  - key: FRED_API_KEY
+    value: ''
+    enabled: true
+    type: secret
+  - key: COINDESK_API_KEY
+    value: ''
+    enabled: true
+    type: secret
+  - key: FXMACRODATA_API_KEY
+    value: ''
+    enabled: true
+    type: secret
+  - key: ALPHA_VANTAGE_API_KEY
+    value: ''
+    enabled: true
+    type: secret

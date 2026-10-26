@@ -1,0 +1,19 @@
+$kind: http-request
+id: 1c5ba24a-8b8c-a0f8-88e0-8d932dd1d50e
+url: 'https://api.fxmacrodata.com/v1/calendar/usd?start_date={{last_week}}&end_date={{today}}'
+method: GET
+order: 1000
+settings:
+  followRedirects: false
+queryParams:
+  - key: start_date
+    value: '{{last_week}}'
+  - key: end_date
+    value: '{{today}}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Calendar returns a data array, including legitimate empty periods', () => {
+        pm.expect(Array.isArray(pm.response.json().data)).to.equal(true);
+      });

@@ -1,0 +1,23 @@
+$kind: http-request
+id: 4d7f153a-6016-72fb-b4c3-e5133f25451c
+url: 'https://min-api.cryptocompare.com/data/v2/news/?lang=EN'
+method: GET
+order: 1000
+settings:
+  followRedirects: false
+queryParams:
+  - key: lang
+    value: 'EN'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Crypto news includes titles, timestamps and source links', () => {
+        const articles = pm.response.json().Data;
+        pm.expect(Array.isArray(articles) && articles.length > 0).to.equal(true);
+        articles.forEach(article => {
+          pm.expect(typeof article.title === 'string' && article.title.length > 0).to.equal(true);
+          pm.expect(Number.isFinite(article.published_on) && article.published_on > 0).to.equal(true);
+          pm.expect(typeof article.url === 'string' && /^https?:\/\//.test(article.url)).to.equal(true);
+        });
+      });
