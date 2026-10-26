@@ -631,16 +631,9 @@ def create_config_panel():
                     [
                         html.Div(
                             [
-                                html.H4("Analysis Configuration", className="config-title"),
-                                html.Div("Auditable multi-agent research", className="config-subtitle"),
+                                html.H4("Analysis setup", className="config-title"),
+                                html.Div("Choose symbols and research settings.", className="config-subtitle"),
                             ]
-                        ),
-                        html.Div(
-                            [
-                                html.I(className="fa-solid fa-wand-magic-sparkles me-2"),
-                                "Live config",
-                            ],
-                            className="config-badge",
                         ),
                     ],
                     className="config-header",
@@ -663,7 +656,7 @@ def create_config_panel():
                             item_id="models",
                         ),
                     ],
-                    active_item=["setup", "models"],
+                    active_item=["setup"],
                     always_open=True,
                     className="config-accordion",
                 ),

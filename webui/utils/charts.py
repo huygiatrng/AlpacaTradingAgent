@@ -79,7 +79,9 @@ def create_chart(ticker: str, period: str = "1y", end_date: Union[str, datetime]
     
     fig.update_layout(
         title=title,
-        template="plotly_white",
+        template="plotly_dark",
+        paper_bgcolor="#1E293B",
+        plot_bgcolor="#1E293B",
         xaxis_rangeslider_visible=False,
         xaxis=dict(
             type='date',
@@ -145,7 +147,9 @@ def create_demo_chart(ticker, period="1y", end_date=None, error_msg=None):
     
     fig.update_layout(
         title=title, 
-        template="plotly_white", 
+        template="plotly_dark",
+        paper_bgcolor="#1E293B",
+        plot_bgcolor="#1E293B",
         xaxis_rangeslider_visible=False,
         xaxis=dict(
             type='date',
@@ -166,12 +170,19 @@ def create_demo_chart(ticker, period="1y", end_date=None, error_msg=None):
 
 
 def create_welcome_chart():
+    """Show a quiet empty state until an analysis supplies chart data."""
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=[0,1,2,3], y=[1,3,2,4], mode='lines', name='Welcome'))
     fig.update_layout(
-        title="Welcome to AlpacaTradingAgent", template="plotly_white",
-        annotations=[dict(x=1.5,y=2.5,xref='x',yref='y',text="Select symbols and click 'Start Analysis'",
-                         showarrow=True,arrowhead=1,ax=0,ay=-40)],
-        height=400, margin=dict(l=40,r=40,t=40,b=40), autosize=True
+        template="plotly_dark",
+        paper_bgcolor="#1E293B",
+        plot_bgcolor="#1E293B",
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
+        annotations=[dict(
+            x=0.5, y=0.5, xref="paper", yref="paper",
+            text="Your chart will appear here<br>after you start an analysis.",
+            showarrow=False, font=dict(color="#94A3B8", size=14),
+        )],
+        height=400, margin=dict(l=20, r=20, t=20, b=20), autosize=True,
     )
     return fig

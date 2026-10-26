@@ -25,21 +25,21 @@ def create_backtest_panel():
                         debounce=True,
                     ),
                 ],
-                md=2,
+                xs=12, sm=6, lg=4,
             ),
             dbc.Col(
                 [
                     dbc.Label("Start date (optional)", html_for="backtest-start-date", className="small"),
                     dbc.Input(id="backtest-start-date", type="date"),
                 ],
-                md=2,
+                xs=12, sm=6, lg=4,
             ),
             dbc.Col(
                 [
                     dbc.Label("End date (optional)", html_for="backtest-end-date", className="small"),
                     dbc.Input(id="backtest-end-date", type="date"),
                 ],
-                md=2,
+                xs=12, sm=6, lg=4,
             ),
             dbc.Col(
                 [
@@ -52,7 +52,7 @@ def create_backtest_panel():
                         step=1,
                     ),
                 ],
-                md=1,
+                xs=12, sm=6, lg=4,
             ),
             dbc.Col(
                 [
@@ -67,7 +67,7 @@ def create_backtest_panel():
                         value="fixed",
                     ),
                 ],
-                md=2,
+                xs=12, sm=6, lg=4,
             ),
             dbc.Col(
                 [
@@ -78,7 +78,7 @@ def create_backtest_panel():
                         value=False,
                     ),
                 ],
-                md=1,
+                xs=12, sm=6, lg=4,
             ),
             dbc.Col(
                 [
@@ -90,7 +90,7 @@ def create_backtest_panel():
                         className="w-100",
                     ),
                 ],
-                md=2,
+                xs=12, sm=6, lg=4,
             ),
         ],
         className="g-2 align-items-end mb-3",

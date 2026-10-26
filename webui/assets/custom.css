@@ -6,6 +6,179 @@ body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
+/* A bounded workspace keeps forms and reports readable on wide displays. */
+.app-shell {
+    max-width: 1440px;
+    padding: 0 24px 24px;
+}
+
+.app-header,
+.app-brand,
+.app-footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.app-header {
+    justify-content: space-between;
+    padding: 24px 0 20px;
+}
+
+.app-brand {
+    min-width: 0;
+}
+
+.app-brand-icon {
+    width: 40px;
+    height: 40px;
+    flex: 0 0 auto;
+}
+
+.app-title {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.app-subtitle {
+    color: #94A3B8;
+    font-size: 0.85rem;
+    margin: 3px 0 0;
+}
+
+.workspace-tabs {
+    gap: 4px;
+    margin: 20px 0;
+    border-bottom: 1px solid #334155;
+}
+
+.app-shell .workspace-tabs .nav-link {
+    padding: 10px 18px;
+    color: #94A3B8;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    font-weight: 600;
+}
+
+.app-shell .workspace-tabs .nav-link.active {
+    color: #F1F5F9;
+    background: transparent;
+    border-color: #2DD4BF;
+}
+
+.app-shell .workspace-tabs .nav-link:hover {
+    color: #F1F5F9;
+    background: rgba(148, 163, 184, 0.08);
+}
+
+.workspace-tabs + .tab-content {
+    padding: 0;
+}
+
+.analysis-workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    align-items: start;
+    gap: 20px;
+}
+
+.analysis-workspace > *,
+.analysis-monitor,
+.card-body,
+.portfolio-tables > * {
+    min-width: 0;
+}
+
+.analysis-monitor h4,
+.reading-workspace h4,
+.portfolio-card h4 {
+    font-size: 1.1rem;
+    font-weight: 650;
+}
+
+.reading-workspace {
+    max-width: 1100px;
+    margin: 0 auto;
+}
+
+.reading-workspace .form-control,
+.reading-workspace .form-select {
+    color-scheme: dark;
+    background-color: #0F172A;
+    border-color: #475569;
+    color: #F1F5F9;
+    min-height: 40px;
+}
+
+.app-footer {
+    justify-content: space-between;
+    flex-wrap: wrap;
+    color: #94A3B8;
+    padding-top: 16px;
+    border-top: 1px solid #334155;
+}
+
+.app-shell .portfolio-card .enhanced-account-summary {
+    margin: 0 0 24px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.portfolio-card .enhanced-table-container {
+    padding: 12px;
+    overflow-x: auto;
+}
+
+.portfolio-card h5 {
+    font-size: 1rem;
+}
+
+@media (max-width: 1099px) {
+    .analysis-workspace {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+@media (max-width: 575px) {
+    .app-shell {
+        padding: 0 12px 20px;
+    }
+
+    .app-header {
+        flex-wrap: wrap;
+        padding: 16px 0;
+    }
+
+    .app-title {
+        font-size: 1.15rem;
+    }
+
+    .app-subtitle {
+        font-size: 0.75rem;
+    }
+
+    .app-header .config-apis-btn {
+        display: none;
+    }
+
+    .workspace-tabs {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0;
+    }
+
+    .app-shell .workspace-tabs .nav-link {
+        padding: 10px 4px;
+        font-size: 0.8rem;
+        text-align: center;
+    }
+}
+
 .dash-markdown {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     line-height: 1.6;
@@ -741,7 +914,7 @@ body {
     background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
     border-radius: 0 0 8px 8px;
     padding: 1.5rem;
-    min-height: 1000px;
+    min-height: 240px;
     border: 1px solid rgba(51, 65, 85, 0.3);
     border-top: none;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
@@ -778,7 +951,7 @@ body {
 [id$="-tab-content"] .debate-content-wrapper {
     background: transparent;
     padding: 0;
-    min-height: 850px;
+    min-height: 240px;
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -1666,6 +1839,8 @@ body {
    ============================================ */
 
 .analysis-config-card {
+    container-type: inline-size;
+    container-name: configuration;
     border-radius: 8px;
     border: 1px solid rgba(71, 85, 105, 0.8);
     background: #111827;
@@ -1695,19 +1870,6 @@ body {
     margin-top: 3px;
     color: #94A3B8;
     font-size: 0.85rem;
-}
-
-.config-badge {
-    display: inline-flex;
-    align-items: center;
-    white-space: nowrap;
-    border-radius: 999px;
-    border: 1px solid rgba(45, 212, 191, 0.32);
-    background: rgba(20, 184, 166, 0.1);
-    color: #5EEAD4;
-    font-size: 0.76rem;
-    font-weight: 700;
-    padding: 0.42rem 0.66rem;
 }
 
 .config-accordion {
@@ -1812,6 +1974,9 @@ body {
 
 .config-field {
     min-width: 0;
+    border: 0;
+    background: transparent;
+    padding: 0;
 }
 
 .config-label,
@@ -1864,7 +2029,7 @@ body {
 
 .analyst-grid {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
 }
 
@@ -1879,7 +2044,7 @@ body {
 }
 
 .analyst-checkbox {
-    width: 100%;
+    flex: 0 0 auto;
     margin: 0;
     color: #E2E8F0;
     font-size: 0.87rem;
@@ -2169,12 +2334,9 @@ body {
 }
 
 .config-action-bar {
-    position: sticky;
-    bottom: 0;
-    z-index: 5;
     margin-top: 14px;
     padding-top: 14px;
-    background: linear-gradient(180deg, rgba(17, 24, 39, 0) 0%, #111827 34%);
+    border-top: 1px solid #334155;
 }
 
 .config-primary-action {
@@ -2190,20 +2352,49 @@ body {
     line-height: 1.45;
 }
 
-@media (max-width: 1200px) {
-    .analyst-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
+.provider-options-grid:not(:has(> div:not([style*="display: none"]))) {
+    display: none;
 }
 
-@media (max-width: 992px) {
+.config-two-column:has(> #backend-url-group[style*="display: none"]) {
+    grid-template-columns: 1fr;
+}
+
+/* Respond to the panel's width, not the size of the entire monitor. */
+@container configuration (max-width: 650px) {
     .config-two-column,
     .model-grid {
         grid-template-columns: 1fr;
     }
+}
 
+@container configuration (min-width: 850px) {
+    .analyst-grid {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+}
+
+@container configuration (max-width: 420px) {
     .analyst-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .analyst-tile-click-target {
+        padding: 0.6rem;
+    }
+
+    .analyst-tile-label {
+        font-size: 0.78rem;
+    }
+
+    .analyst-tile-label .me-2 {
+        margin-right: 2px !important;
+    }
+}
+
+@container configuration (max-width: 340px) {
+    .analyst-grid {
+        grid-template-columns: 1fr;
     }
 }
 
@@ -2216,11 +2407,6 @@ body {
         flex-direction: column;
     }
 
-    .config-badge {
-        white-space: normal;
-    }
-
-    .analyst-grid,
     .llm-param-controls,
     .segmented-radio {
         grid-template-columns: 1fr;

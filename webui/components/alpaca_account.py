@@ -351,7 +351,7 @@ def render_account_summary():
                         ], className="summary-label"),
                         html.Div(f"${buying_power:.2f}", className="summary-value")
                     ], className="summary-item enhanced-summary-item")
-                ], width=4),
+                ], xs=12, sm=4),
                 dbc.Col([
                     html.Div([
                         html.Div([
@@ -360,7 +360,7 @@ def render_account_summary():
                         ], className="summary-label"),
                         html.Div(f"${cash:.2f}", className="summary-value")
                     ], className="summary-item enhanced-summary-item")
-                ], width=4),
+                ], xs=12, sm=4),
                 dbc.Col([
                     html.Div([
                         html.Div([
@@ -372,7 +372,7 @@ def render_account_summary():
                             html.Span(f"({daily_change_percent:.2f}%)")
                         ], className=f"summary-value {daily_change_class}")
                     ], className="summary-item enhanced-summary-item")
-                ], width=4)
+                ], xs=12, sm=4)
             ])
         ], className="account-summary enhanced-account-summary")
 
@@ -422,7 +422,7 @@ def render_alpaca_account_section():
             title="Refresh Alpaca account data"
             )
         ], className="mb-3 d-flex align-items-center"),
-        html.Hr(),
+        render_account_summary(),
         dbc.Row([
             dbc.Col([
                 html.H5([
@@ -430,7 +430,7 @@ def render_alpaca_account_section():
                     "Open Positions"
                 ], className="mb-3"),
                 html.Div(id="positions-table-container", children=render_positions_table())
-            ], md=7),
+            ], xs=12, xl=7),
             dbc.Col([
                 html.H5([
                     html.I(className="fas fa-history me-2"),
@@ -438,13 +438,12 @@ def render_alpaca_account_section():
                 ], className="mb-3"),
                 dcc.Store(id="orders-page-store", data=1),
                 html.Div(id="orders-table-container", children=render_orders_table())
-            ], md=5)
-        ]),
-        render_account_summary(),
+            ], xs=12, xl=5)
+        ], className="g-4 portfolio-tables"),
         # Hidden div for liquidation confirmations
         dcc.ConfirmDialog(
             id='liquidate-confirm',
             message='',
         ),
         html.Div(id="liquidation-status", className="mt-3")
-    ], className="mb-4 alpaca-account-section enhanced-alpaca-section")
+    ], className="alpaca-account-section enhanced-alpaca-section")

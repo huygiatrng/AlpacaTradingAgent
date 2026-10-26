@@ -235,13 +235,13 @@ def create_reports_panel():
             dbc.Row([
                 dbc.Col([
                     create_symbol_pagination("report-pagination")
-                ], width=8),
+                ], xs=12, sm=8),
                 dbc.Col([
                     html.Div([
                         html.I(className="fas fa-chart-bar me-2"),
                         html.Span(id="current-symbol-report-display", className="symbol-display")
                     ], className="text-center current-symbol-container"),
-                ], width=4)
+                ], xs=12, sm=4)
             ], className="mb-3 pagination-row"),
             tabs,
             hidden_content_containers,

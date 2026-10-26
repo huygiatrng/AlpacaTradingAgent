@@ -15,15 +15,15 @@ def create_status_panel():
             dbc.Row([
                 dbc.Col([
                     html.Div(id="tool-calls-text", children="🧰 Tool Calls: 0"),
-                ], width=4),
+                ], xs=12, sm=4),
                 dbc.Col([
                     html.Div(id="llm-calls-text", children="🤖 LLM Calls: 0"),
-                ], width=4),
+                ], xs=12, sm=4),
                 dbc.Col([
                     html.Div(id="reports-text", children="📊 Generated Reports: 0"),
-                ], width=4),
+                ], xs=12, sm=4),
             ], className="mt-3"),
             html.Div(id="refresh-status", children="⏸️ Updates paused until analysis starts", className="text-secondary mt-2")
         ]),
         className="mb-4"
-    ) 
+    )

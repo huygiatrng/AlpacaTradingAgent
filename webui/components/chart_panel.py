@@ -9,9 +9,9 @@ from webui.utils.charts import create_welcome_chart
 
 def create_symbol_pagination(pagination_id, max_symbols=1):
     """Create a custom pagination component using symbol names instead of page numbers"""
-    return html.Div(id=f"{pagination_id}-container", 
+    return html.Div(id=f"{pagination_id}-container",
                    children=[
-                       html.Div("No symbols available", 
+                       html.Div("No symbols available",
                                className="text-muted text-center",
                                style={"padding": "10px"})
                    ],
@@ -22,16 +22,16 @@ def create_chart_panel():
     """Create the chart panel for the web UI with symbol-based pagination."""
     return dbc.Card(
         dbc.CardBody([
-            html.H4("Stock Chart & Technical Analysis", className="mb-3"),
+            html.H4("Price chart", className="mb-3"),
             html.Hr(),
             dbc.Row([
                 dbc.Col([
                     create_symbol_pagination("chart-pagination")
-                ], width=8),
+                ], xs=12, sm=8),
                 dbc.Col([
                     dbc.Button("🔄 Refresh Chart", id="manual-chart-refresh", color="outline-secondary", size="sm", className="float-end"),
-                ], width=4)
-            ], className="mb-2"),
+                ], xs=12, sm=4)
+            ], className="g-2 mb-2"),
             html.Div(id="current-symbol-display", className="text-center my-2"),
             html.Div(id="chart-last-updated", className="text-muted text-center small mb-2"),
             dbc.ButtonGroup([
@@ -42,7 +42,7 @@ def create_chart_panel():
             ], className="mb-3"),
             html.Div(
                 dcc.Graph(
-                    id="chart-container", 
+                    id="chart-container",
                     figure=create_welcome_chart(),
                     config={'displayModeBar': True, 'responsive': True},
                     style={"height": "400px", "width": "100%"}
@@ -62,4 +62,4 @@ def create_chart_panel():
             ], style={"display": "none"})  # Additional CSS hiding
         ]),
         className="mb-4"
-    ) 
+    )

@@ -18,7 +18,7 @@ from webui.components.safety_panel import create_safety_panel
 from webui.components.cost_panel import create_cost_panel
 from webui.components.api_config_modal import create_api_config_modal
 from webui.components.connection_panel import create_connection_panel
-from webui.config.constants import COLORS, REFRESH_INTERVALS
+from webui.config.constants import REFRESH_INTERVALS
 
 
 def create_intervals():
@@ -63,20 +63,12 @@ def create_stores():
 
 def create_footer():
     """Create the footer section"""
-    return dbc.Row(
+    return html.Footer(
         [
-            dbc.Col(
-                dbc.Button("Refresh Status", id="refresh-btn", color="secondary", className="mb-2"),
-                width="auto",
-                className="d-flex justify-content-center"
-            ),
-            dbc.Col(
-                html.Div("Status updates automatically every 0.5 seconds", className="text-info small"),
-                width="auto",
-                className="d-flex align-items-center"
-            ),
+            html.Small("Status refreshes automatically while analysis is running."),
+            dbc.Button("Refresh status", id="refresh-btn", color="secondary", outline=True, size="sm"),
         ],
-        className="d-flex justify-content-center"
+        className="app-footer"
     )
 
 
@@ -96,7 +88,7 @@ def create_main_layout():
         dbc.CardBody([
             render_alpaca_account_section()
         ]),
-        className="mb-4"
+        className="portfolio-card"
     )
     
     # Create API config modal
@@ -170,26 +162,41 @@ def create_main_layout():
             header,
             create_connection_panel(),
             create_safety_panel(),
-            alpaca_account_card,
-            dbc.Row([
-                dbc.Col(config_card, md=6),
-                dbc.Col([
-                    chart_card,
-                    html.Div(className="mb-3"),  # Add some spacing
-                    status_card,
-                    html.Div(className="mb-3"),  # Add some spacing
-                    decision_card,
-                ], md=6)
-            ]),
-            reports_card,
-            create_backtest_panel(),
-            create_cost_panel(),
-            html.Div(className="mt-4"),
+            # Bootstrap tabs keep every panel mounted so callbacks and form state
+            # remain available when a different workspace is visible.
+            dbc.Tabs(
+                [
+                    dbc.Tab(
+                        html.Div(
+                            [
+                                config_card,
+                                html.Div([status_card, chart_card, decision_card], className="analysis-monitor"),
+                            ],
+                            className="analysis-workspace",
+                        ),
+                        label="Analysis",
+                        tab_id="analysis",
+                    ),
+                    dbc.Tab(alpaca_account_card, label="Portfolio", tab_id="portfolio"),
+                    dbc.Tab(
+                        html.Div(reports_card, className="reading-workspace"),
+                        label="Reports",
+                        tab_id="reports",
+                    ),
+                    dbc.Tab(
+                        html.Div([create_backtest_panel(), create_cost_panel()], className="reading-workspace"),
+                        label="Performance",
+                        tab_id="performance",
+                    ),
+                ],
+                id="workspace-tabs",
+                active_tab="analysis",
+                className="workspace-tabs",
+            ),
             create_footer(),
         ],
         fluid=True,
-        className="p-4",
-        style={"backgroundColor": COLORS["background"]}
+        className="app-shell",
     )
     
     return layout
