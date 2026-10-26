@@ -41,7 +41,7 @@ def _accordion_title(icon, title, meta):
 def _field(label, control, icon=None, class_name=""):
     label_children = []
     if icon:
-        label_children.append(html.I(className=f"fa-solid {icon} me-2"))
+        label_children.append(html.I(className=f"fa-solid fa-{icon.removeprefix('fa-')} me-2"))
     label_children.append(label)
 
     return html.Div(
@@ -230,7 +230,10 @@ def _model_panel(role, title, icon, default_model):
                 [
                     html.Div(
                         [
-                            html.I(className=f"fa-solid {icon} model-panel-icon"),
+                            html.Span(
+                                html.I(className=f"fa-solid fa-{icon.removeprefix('fa-')}"),
+                                className="model-panel-icon",
+                            ),
                             html.Div(
                                 [
                                     html.H6(title, className="model-panel-title"),
@@ -465,7 +468,7 @@ def _schedule_and_trading():
                             ],
                             className="config-input-group",
                         ),
-                        "sack-dollar",
+                        "coins",
                     ),
                 ],
                 className="config-two-column",

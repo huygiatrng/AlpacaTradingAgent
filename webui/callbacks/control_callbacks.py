@@ -294,7 +294,7 @@ def register_control_callbacks(app):
             f"{metadata['summary']} API key: {metadata['api_key']}. Endpoint: {metadata['endpoint']}.",
             metadata.get("pills"),
             tone="info",
-            icon="fa-plug-circle-bolt",
+            icon="fa-plug",
         )
         backend_style = {} if metadata.get("backend_visible") else {"display": "none"}
         google_style = {} if provider == "google" else {"display": "none"}
