@@ -29,20 +29,21 @@ def register_api_config_callbacks(app):
         Output("api-config-modal", "is_open"),
         [
             Input("open-api-config-btn", "n_clicks"),
+            Input("setup-api-btn", "n_clicks"),
             Input("close-api-config-btn", "n_clicks"),
             Input("save-api-keys-btn", "n_clicks")
         ],
         State("api-config-modal", "is_open"),
         prevent_initial_call=True
     )
-    def toggle_api_config_modal(open_clicks, close_clicks, save_clicks, is_open):
+    def toggle_api_config_modal(open_clicks, setup_clicks, close_clicks, save_clicks, is_open):
         """Toggle the API config modal open/close state"""
         if not ctx.triggered:
             raise PreventUpdate
         
         trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
         
-        if trigger_id == "open-api-config-btn":
+        if trigger_id in {"open-api-config-btn", "setup-api-btn"}:
             return True
         elif trigger_id in ["close-api-config-btn", "save-api-keys-btn"]:
             return False
@@ -204,16 +205,13 @@ def register_api_config_callbacks(app):
         api_id = api_config["id"]
         
         @app.callback(
-            Output(f"api-status-{api_id}", "color"),
+            Output(f"api-status-{api_id}", "children"),
             Input(f"api-input-{api_id}", "value"),
             prevent_initial_call=True
         )
         def update_status_indicator(value, _api_id=api_id):
             """Update the status indicator color based on whether key is set"""
-            if value and len(value.strip()) > 5:
-                return "success"
-            else:
-                return "outline-secondary"
+            return "Entered" if value and value.strip() else "Not set"
 
 
 def apply_api_keys_to_config(api_keys):
@@ -239,6 +237,7 @@ def apply_api_keys_to_config(api_keys):
             "fred_api_key": api_keys.get("fred", ""),
             "coindesk_api_key": api_keys.get("coindesk", ""),
             "alpha_vantage_api_key": api_keys.get("alpha-vantage", ""),
+            "fxmacrodata_api_key": api_keys.get("fxmacrodata", ""),
             "alpaca_use_paper": api_keys.get("alpaca-paper", True)
         }
         

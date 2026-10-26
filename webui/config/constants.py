@@ -22,7 +22,7 @@ COLORS = {
 # Refresh intervals (in milliseconds)
 REFRESH_INTERVALS = {
     "fast": 2000,      # 2 seconds for critical updates during analysis
-    "medium": 10000,   # 5 seconds for reports (reduced frequency for less interference)  
+    "medium": 10000,   # 5 seconds for reports (reduced frequency for less interference)
     "slow": 60000,    # 1 minutes for account data (was 30 seconds)
 }
 
@@ -30,8 +30,8 @@ REFRESH_INTERVALS = {
 APP_CONFIG = {
     "title": "TradingAgents - Multi-Agent Financial Analysis",
     "external_stylesheets": [
-        "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+        "/assets/vendor/fontawesome.min.css"
     ],
     "suppress_callback_exceptions": True,
     "update_title": None,
-} 
+}

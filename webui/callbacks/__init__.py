@@ -13,6 +13,7 @@ from .api_config_callbacks import register_api_config_callbacks
 from .backtest_callbacks import register_backtest_callbacks
 from .safety_callbacks import register_safety_callbacks
 from .cost_callbacks import register_cost_callbacks
+from .connection_callbacks import register_connection_callbacks
 
 def register_all_callbacks(app):
     """Register all callback functions with the Dash app"""
@@ -26,3 +27,4 @@ def register_all_callbacks(app):
     register_backtest_callbacks(app)
     register_safety_callbacks(app)
     register_cost_callbacks(app)
+    register_connection_callbacks(app)
