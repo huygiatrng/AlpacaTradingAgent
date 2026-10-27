@@ -10,6 +10,7 @@ from copy import deepcopy
 import re
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
+from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.llm_clients.model_catalog import get_model_options as get_provider_catalog_options
 
 
@@ -113,7 +114,7 @@ MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
     ),
     "gpt-5.6-sol": _reasoning_spec(
         model_id="gpt-5.6-sol",
-        label="GPT-5.6 Sol - latest frontier",
+        label="GPT-5.6 Sol - deep thinker default",
         description="Current GPT-5.6 frontier model for the hardest professional work.",
         roles=("deep",),
         reasoning_effort_options=["none", "low", "medium", "high", "xhigh", "max"],
@@ -197,7 +198,7 @@ MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
     ),
     "gpt-5.4-mini": _reasoning_spec(
         model_id="gpt-5.4-mini",
-        label="GPT-5.4 Mini - balanced default",
+        label="GPT-5.4 Mini - compact alternative",
         description="Recent mini model with strong quality, lower latency, and lower cost.",
         reasoning_effort_options=["none", "low", "medium", "high", "xhigh"],
         role_defaults={
@@ -543,11 +544,11 @@ def get_model_options_for_provider(provider: str, role: str) -> List[Dict[str, s
 def get_default_model_for_provider(provider: str, role: str) -> str:
     provider_key = (provider or "openai").lower()
     if provider_key in ("openai", "local_openai"):
-        return "gpt-5.4-nano" if role == "quick" else "gpt-5.4-mini"
+        return DEFAULT_CONFIG["quick_think_llm" if role == "quick" else "deep_think_llm"]
     options = get_model_options_for_provider(provider, role)
     if options:
         return options[0]["value"]
-    return "gpt-5.4-nano" if role == "quick" else "gpt-5.4-mini"
+    return DEFAULT_CONFIG["quick_think_llm" if role == "quick" else "deep_think_llm"]
 
 
 def resolve_model_choice(model_choice: str, custom_model: Optional[str] = None) -> Optional[str]:

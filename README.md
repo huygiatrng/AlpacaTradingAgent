@@ -45,7 +45,7 @@ AlpacaTradingAgent introduces powerful new capabilities specifically designed fo
 - **Provider Choice**: Supports OpenAI, local OpenAI-compatible endpoints, Google Gemini, Anthropic Claude, xAI, MiniMax, DeepSeek, Qwen, GLM, OpenRouter, Ollama, and Azure OpenAI
 - **Provider-Specific Controls**: Uses the OpenAI Responses API for GPT-6/GPT-5 reasoning models, validates Gemini thinking levels by family, sends Claude effort through native `output_config`, and exposes Grok reasoning effort
 - **Forward Compatibility**: Every provider accepts custom model IDs, while the built-in catalog remains curated from official provider documentation
-- **Cost-Safe Defaults**: Default models remain `gpt-5.4-nano` and `gpt-5.4-mini`; selecting a new flagship is explicit
+- **Default Models**: Quick thinker starts with `gpt-5.4-nano`; Deep thinker starts with `gpt-5.6-sol`. GPT-6 Astra is an optional selection.
 - **Local Compatibility**: `OPENAI_USE_LOCAL` and `OPENAI_BASE_URL` continue to route core LLM calls to a local OpenAI-compatible backend
 
 ### 🧾 **Structured Decisions, Memory, and Resume**
@@ -332,7 +332,7 @@ from tradingagents.default_config import DEFAULT_CONFIG
 
 # Create custom config for enhanced features
 config = DEFAULT_CONFIG.copy()
-config["deep_think_llm"] = "gpt-5.4-mini"  # Balanced current default
+config["deep_think_llm"] = "gpt-5.6-sol"  # Default deep thinker
 config["quick_think_llm"] = "gpt-5.4-nano"  # New low-cost quick model
 config["quick_llm_params"] = {
     "reasoning_effort": "low",

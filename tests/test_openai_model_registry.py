@@ -110,9 +110,9 @@ class OpenAIModelRegistryTests(unittest.TestCase):
             "https://api.minimax.io/v1",
         )
 
-    def test_openai_provider_defaults_stay_cost_safe_after_switching(self):
+    def test_openai_provider_defaults_after_switching(self):
         self.assertEqual(get_default_model_for_provider("openai", "quick"), "gpt-5.4-nano")
-        self.assertEqual(get_default_model_for_provider("openai", "deep"), "gpt-5.4-mini")
+        self.assertEqual(get_default_model_for_provider("openai", "deep"), "gpt-5.6-sol")
         self.assertEqual(get_default_model_for_provider("local_openai", "quick"), "gpt-5.4-nano")
 
     def test_custom_model_choice_resolves_to_runtime_model_id(self):

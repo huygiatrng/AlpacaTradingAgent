@@ -38,7 +38,7 @@ DEFAULT_CONFIG = {
     ),
     # LLM settings
     "llm_provider": os.getenv("LLM_PROVIDER", "openai"),
-    "deep_think_llm": "gpt-5.4-mini",
+    "deep_think_llm": "gpt-5.6-sol",
     "quick_think_llm": "gpt-5.4-nano",
     "backend_url": None,
     "google_thinking_level": None,

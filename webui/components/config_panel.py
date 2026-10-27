@@ -613,8 +613,8 @@ def _model_setup():
             ),
             html.Div(
                 [
-                    _model_panel("quick", "Quick thinker", "bolt", "gpt-5.4-nano"),
-                    _model_panel("deep", "Deep thinker", "brain", "gpt-5.4-mini"),
+                    _model_panel("quick", "Quick thinker", "bolt", DEFAULT_CONFIG["quick_think_llm"]),
+                    _model_panel("deep", "Deep thinker", "brain", DEFAULT_CONFIG["deep_think_llm"]),
                 ],
                 className="model-grid",
             ),

@@ -3,6 +3,7 @@ Storage utility for persisting user settings in localStorage
 """
 
 from typing import Dict, Any
+from tradingagents.default_config import DEFAULT_CONFIG
 
 # Default settings structure
 DEFAULT_SETTINGS = {
@@ -12,7 +13,7 @@ DEFAULT_SETTINGS = {
     "analyst_news": True,
     "analyst_fundamentals": True,
     "analyst_macro": True,
-    "research_depth": "Shallow",
+    "research_depth": DEFAULT_CONFIG["research_depth"],
     "allow_shorts": False,
     "loop_enabled": False,
     "loop_interval": 60,
@@ -24,8 +25,8 @@ DEFAULT_SETTINGS = {
     "backend_url": "",
     "output_language": "English",
     "checkpoint_enabled": False,
-    "quick_llm": "gpt-5.4-nano",
-    "deep_llm": "gpt-5.4-mini",
+    "quick_llm": DEFAULT_CONFIG["quick_think_llm"],
+    "deep_llm": DEFAULT_CONFIG["deep_think_llm"],
     "quick_llm_custom_model": "",
     "deep_llm_custom_model": "",
     "google_thinking_level": "",
