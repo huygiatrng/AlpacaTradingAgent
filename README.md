@@ -56,6 +56,14 @@ AlpacaTradingAgent introduces powerful new capabilities specifically designed fo
 - **Checkpoint Resume**: Optional per-symbol SQLite checkpoints allow failed LangGraph runs to resume while successful runs clean up automatically
 - **Safe Paths**: Report, cache, checkpoint, and log paths use safe ticker components, including crypto symbols like `BTC/USD -> BTC_USD`
 
+### Research and risk defaults
+
+The [Tauric paper](https://arxiv.org/abs/2412.20138) motivates specialized research, opposing arguments and a separate risk review. Its historical experiment is not a prescription for today's models or a guaranteed return. The [current upstream implementation](https://github.com/TauricResearch/TradingAgents/blob/main/tradingagents/default_config.py) defaults to one debate round; this fork starts at Medium (three research and three risk rounds) to allow rebuttals. That is an operating choice, not an experimentally proven optimum.
+
+Web search now follows the selected depth: low, medium or high coverage. The three `*_fast_profile` settings in `tradingagents/default_config.py` can still opt into narrow searches. News handles ticker headlines while Macro handles broad events, avoiding duplicate global searches. Search output budgets are 4,096 tokens to leave room for model reasoning and cited evidence; the prompts still request concise reports. This can take longer and cost more than the previous fast profile. Model choices and reasoning controls remain independent of research depth, and saved model selections are retained. OpenAI web-search tools still require an OpenAI key even when another provider runs the agents.
+
+Position sizing is enabled by default: each new entry is capped at 1% of equity risk at the planned stop and 20% of equity notional, with an 80% gross exposure limit and the requested trade amount as additional ceilings. The separate concentration guard caps total exposure to one symbol at 25%. Existing volatility, correlation and market-regime adjustments can reduce sizing further. Daily loss of 3% or drawdown of 10% halts new risk; these thresholds do not guarantee maximum realized loss during gaps or outages. Paper trading, long-only mode and manual execution remain the defaults. Evaluate net returns after trading and API costs, drawdown and benchmark performance over multiple periods before treating a configuration as better.
+
 ### ⚡ **Automated Trading & Scheduling**
 - **Market Hours Trading**: Automatic execution during market hours
 - **Scheduled Analysis**: Configurable recurring analysis every N hours

@@ -1942,6 +1942,11 @@ body {
     align-items: stretch;
 }
 
+.model-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+    align-items: start;
+}
+
 .config-field,
 .config-toggle-tile,
 .model-panel,
@@ -2184,6 +2189,8 @@ body {
 
 .model-panel {
     min-width: 0;
+    container-type: inline-size;
+    container-name: model-settings;
 }
 
 .provider-options-grid {
@@ -2286,7 +2293,7 @@ body {
 .llm-param-controls {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
+    gap: 14px;
     padding: 0;
     margin: 0;
     border: none;
@@ -2295,15 +2302,26 @@ body {
 
 .llm-param-field {
     min-width: 0;
-    padding: 10px;
-    border-radius: 8px;
-    border: 1px solid rgba(71, 85, 105, 0.52);
-    background: #111827;
 }
 
 .llm-param-switch {
-    display: flex;
-    align-items: center;
+    grid-column: 1 / -1;
+}
+
+.llm-param-switch .config-switch-row {
+    justify-content: space-between;
+    width: 100%;
+}
+
+.llm-param-switch .config-switch {
+    min-width: 0;
+    margin: 0;
+}
+
+@container model-settings (max-width: 380px) {
+    .llm-param-controls {
+        grid-template-columns: 1fr;
+    }
 }
 
 .llm-param-help {
@@ -2342,8 +2360,7 @@ body {
 
 /* Respond to the panel's width, not the size of the entire monitor. */
 @container configuration (max-width: 650px) {
-    .config-two-column,
-    .model-grid {
+    .config-two-column {
         grid-template-columns: 1fr;
     }
 }

@@ -719,6 +719,9 @@ def run_analysis():
     config = DEFAULT_CONFIG.copy()
     config["max_debate_rounds"] = selections["research_depth"]
     config["max_risk_discuss_rounds"] = selections["research_depth"]
+    config["research_depth"] = {1: "Shallow", 3: "Medium", 5: "Deep"}.get(
+        selections["research_depth"], DEFAULT_CONFIG["research_depth"]
+    )
     config["quick_think_llm"] = selections["shallow_thinker"]
     config["deep_think_llm"] = selections["deep_thinker"]
     config["llm_provider"] = selections["llm_provider"]

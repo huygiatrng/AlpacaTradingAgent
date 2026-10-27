@@ -93,7 +93,7 @@ class TradingAgentsGraph:
         # Log the configuration being used
         quick_params_desc = describe_model_params(quick_think_model, quick_think_kwargs, "quick")
         deep_params_desc = describe_model_params(deep_think_model, deep_think_kwargs, "deep")
-        print(f"[LLM CONFIG] Research Depth: {research_depth} (debate rounds only)")
+        print(f"[LLM CONFIG] Research Depth: {research_depth} (debate rounds and search coverage; model parameters are separate)")
         print(f"[LLM CONFIG] Quick Thinker ({quick_think_model}): {quick_params_desc}")
         print(f"[LLM CONFIG] Deep Thinker ({deep_think_model}): {deep_params_desc}")
 

@@ -63,7 +63,8 @@ DEFAULT_CONFIG = {
         "parallel_tool_calls": True,
     },
     # Debate and discussion settings
-    "max_debate_rounds": 4,
+    "research_depth": "Medium",
+    "max_debate_rounds": 3,
     "max_risk_discuss_rounds": 3,
     "max_recur_limit": 200,
     # Trading settings
@@ -71,15 +72,15 @@ DEFAULT_CONFIG = {
     # Deterministic risk sizing: when enabled, position size for opening trades
     # is recomputed by tradingagents.risk (fractional Kelly, ATR stops, exposure
     # caps) with the configured trade amount acting as a hard ceiling.
-    "risk_sizing_enabled": False,
+    "risk_sizing_enabled": True,
     "risk_sizing_params": {},  # optional RiskParameters overrides (see tradingagents/risk/position_sizing.py)
     "protective_bracket_orders_enabled": True,  # Submit stop-loss/take-profit as real bracket/OTO child orders on equity entries (crypto unsupported by Alpaca)
     # Production safety layer (deterministic, independent of agent logic)
     "safety_enabled": True,  # Master switch for pre-trade checks + circuit breakers + kill switch
     "max_trade_notional_usd": 25000.0,  # Per-order notional cap; 0 = uncapped
     "max_symbol_concentration_pct": 25.0,  # Max per-symbol exposure as % of equity; 0 = uncapped
-    "daily_loss_halt_pct": 10.0,  # Circuit breaker: halt trading when equity falls this % vs yesterday
-    "max_drawdown_halt_pct": 15.0,  # Circuit breaker: halt when equity falls this % below the high-water mark
+    "daily_loss_halt_pct": 3.0,  # Circuit breaker: halt trading when equity falls this % vs yesterday
+    "max_drawdown_halt_pct": 10.0,  # Circuit breaker: halt when equity falls this % below the high-water mark
     "max_consecutive_rejections": 5,  # Circuit breaker: halt after this many broker rejections in a row
     "daily_llm_token_budget": 0,  # Refuse new analyses after this many LLM tokens per day; 0 = unlimited
     # Operational alerts (Telegram / webhook; stdlib-only, failure-isolated)
@@ -163,17 +164,17 @@ DEFAULT_CONFIG = {
     "data_fallback_enabled": False,  # Optional yfinance backup for supported Alpaca data failures
     "web_search_timeout_extension_seconds": 45,  # Extra timeout buffer added by timing wrapper for web-search tools
     "news_global_openai_enabled": False,  # News analyst uses fast ticker sources by default; macro handles broad global context
-    "global_news_fast_profile": True,  # Keep global-news tool lean even at medium/deep research depth
-    "stock_news_fast_profile": True,  # Keep stock-news web-search tool lean at medium/deep depth
-    "fundamentals_fast_profile": True,  # Keep fundamentals web-search tool lean at medium/deep depth
+    "global_news_fast_profile": False,  # Let Shallow/Medium/Deep control search coverage
+    "stock_news_fast_profile": False,
+    "fundamentals_fast_profile": False,
     "global_news_timeout_seconds": 150,  # Timeout for get_global_news_openai web-search calls
-    "global_news_max_output_tokens": 1200,  # Applied to models that support explicit output-token caps
+    "global_news_max_output_tokens": 4096,  # Includes reasoning tokens on supported models; prose stays concise
     "global_news_max_events": 8,  # Cap number of events requested from global-news tool
     "global_news_word_budget": 550,  # Target output length from global-news tool
     "stock_news_timeout_seconds": 120,  # Timeout for get_stock_news_openai web-search calls
-    "stock_news_max_output_tokens": 900,  # Output-token cap for social/news web-search summary tool
+    "stock_news_max_output_tokens": 4096,  # Leave room for reasoning and a sourced summary
     "fundamentals_timeout_seconds": 120,  # Timeout for get_fundamentals_openai web-search calls
-    "fundamentals_max_output_tokens": 1000,  # Output-token cap for fundamentals web-search summary tool
+    "fundamentals_max_output_tokens": 4096,  # Leave room for reasoning and a sourced summary
     "google_news_max_pages": 3,  # Google News pages fetched before dedupe/limit
     "google_news_max_items": 18,  # Max deduped Google News items returned to analysts
     "openai_store_responses": False,  # Disable response storing by default to reduce latency/payload

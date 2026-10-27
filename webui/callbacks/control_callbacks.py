@@ -466,7 +466,7 @@ def register_control_callbacks(app):
 
         research_depth_info = {
             "Shallow": {
-                "description": "Fast pass with minimal debate.",
+                "description": "Narrow web coverage and a single debate pass.",
                 "settings": [
                     "1 debate round",
                     "1 risk round",
@@ -475,7 +475,7 @@ def register_control_callbacks(app):
                 "icon": "fa-gauge-high",
             },
             "Medium": {
-                "description": "Balanced discussion depth.",
+                "description": "Balanced web coverage with time for rebuttals.",
                 "settings": [
                     "3 debate rounds",
                     "3 risk rounds",
@@ -484,7 +484,7 @@ def register_control_callbacks(app):
                 "icon": "fa-scale-balanced",
             },
             "Deep": {
-                "description": "Most thorough agent debate.",
+                "description": "Broader web coverage and more debate; takes longer.",
                 "settings": [
                     "5 debate rounds",
                     "5 risk rounds",

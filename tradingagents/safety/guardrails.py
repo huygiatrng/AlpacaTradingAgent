@@ -25,17 +25,15 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from tradingagents.default_config import DEFAULT_CONFIG
+
 DEFAULT_SAFETY_CONFIG: Dict[str, Any] = {
-    "safety_enabled": True,
-    # Pre-trade checks
-    "max_trade_notional_usd": 25_000.0,  # 0 = uncapped
-    "max_symbol_concentration_pct": 25.0,  # of account equity; 0 = uncapped
-    # Circuit breakers
-    "daily_loss_halt_pct": 10.0,  # halt when equity drops this % vs yesterday
-    "max_drawdown_halt_pct": 15.0,  # halt when equity drops this % vs high-water mark
-    "max_consecutive_rejections": 5,  # halt after this many broker rejections in a row
-    # LLM cost cap
-    "daily_llm_token_budget": 0,  # tokens/day across all runs; 0 = unlimited
+    key: DEFAULT_CONFIG[key]
+    for key in (
+        "safety_enabled", "max_trade_notional_usd", "max_symbol_concentration_pct",
+        "daily_loss_halt_pct", "max_drawdown_halt_pct", "max_consecutive_rejections",
+        "daily_llm_token_budget",
+    )
 }
 
 _SAFETY_HOME = Path(os.path.expanduser("~")) / ".tradingagents" / "safety"

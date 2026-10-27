@@ -4,6 +4,7 @@ webui/components/config_panel.py - Configuration panel for the web UI.
 
 import dash_bootstrap_components as dbc
 from dash import dcc, html
+from tradingagents.default_config import DEFAULT_CONFIG
 
 from tradingagents.openai_model_registry import (
     PARAMETER_HELP,
@@ -353,7 +354,7 @@ def _core_setup():
                                 {"label": "Medium", "value": "Medium"},
                                 {"label": "Deep", "value": "Deep"},
                             ],
-                            value="Shallow",
+                            value=DEFAULT_CONFIG["research_depth"],
                             inline=True,
                             className="segmented-radio",
                         ),
